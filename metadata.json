@@ -1,0 +1,6 @@
+{
+  "name": "Certiport GenAI Prep",
+  "description": "Hệ thống luyện thi chứng chỉ quốc tế Certiport Generative AI với ngân hàng câu hỏi tương tác chuẩn cấu trúc phòng thi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

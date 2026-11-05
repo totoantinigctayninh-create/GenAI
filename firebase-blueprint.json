@@ -1,0 +1,218 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Tài khoản giáo viên hoặc học sinh trong hệ thống luyện thi Certiport Generative AI",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã định danh duy nhất (Username / Student ID)",
+          "maxLength": 64
+        },
+        "username": {
+          "type": "string",
+          "description": "Tên đăng nhập hoặc Mã học sinh",
+          "maxLength": 64
+        },
+        "password": {
+          "type": "string",
+          "description": "Mật khẩu đăng nhập",
+          "maxLength": 128
+        },
+        "fullName": {
+          "type": "string",
+          "description": "Họ và tên đầy đủ của giáo viên hoặc học sinh",
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "description": "Vai trò người dùng trong hệ thống",
+          "enum": ["teacher", "student"]
+        },
+        "className": {
+          "type": "string",
+          "description": "Lớp học hoặc đơn vị",
+          "maxLength": 64
+        },
+        "lastLogin": {
+          "type": "string",
+          "description": "Thời gian đăng nhập gần nhất (ISO 8601)",
+          "maxLength": 64
+        },
+        "activeStatus": {
+          "type": "string",
+          "description": "Trạng thái hoạt động hiện tại",
+          "enum": ["online", "studying", "offline", "in_exam"],
+          "maxLength": 32
+        },
+        "totalStudySeconds": {
+          "type": "number",
+          "description": "Tổng thời gian ôn tập tích lũy tính bằng giây"
+        },
+        "bookmarkedQuestions": {
+          "type": "array",
+          "description": "Danh sách mã câu hỏi học sinh đã đánh dấu (Bookmark)"
+        },
+        "wrongQuestions": {
+          "type": "array",
+          "description": "Danh sách mã câu hỏi học sinh làm sai trong Luyện tập hoặc Thi thử"
+        },
+        "masteredQuestions": {
+          "type": "array",
+          "description": "Danh sách mã câu hỏi trong Kho câu sai đã được học sinh làm đúng và nắm vững"
+        },
+        "practiceProgress": {
+          "type": "object",
+          "description": "Tiến độ trả lời từng câu hỏi trong chế độ Luyện tập"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Thời điểm tạo tài khoản (ISO 8601)",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "username",
+        "password",
+        "fullName",
+        "role"
+      ]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Câu hỏi luyện thi chuẩn cấu trúc Certiport Generative AI",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã câu hỏi",
+          "maxLength": 64
+        },
+        "type": {
+          "type": "string",
+          "description": "Loại câu hỏi tương tác chuẩn Certiport",
+          "enum": ["mcq_single", "mcq_multiple", "dropdown", "matching", "ordering"]
+        },
+        "topic": {
+          "type": "string",
+          "description": "Chuyên đề kiến thức Certiport",
+          "maxLength": 160
+        },
+        "examSet": {
+          "type": "string",
+          "description": "Mã đề ôn tập cố định",
+          "maxLength": 40
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Nội dung câu hỏi chính bằng tiếng Việt",
+          "maxLength": 2000
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "URL hoặc Base64 hình minh họa cho câu hỏi",
+          "maxLength": 500000
+        },
+        "explanation": {
+          "type": "string",
+          "description": "Giải thích chi tiết đáp án đúng",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Thời điểm khởi tạo câu hỏi",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "topic",
+        "examSet",
+        "prompt",
+        "correctAnswer",
+        "explanation"
+      ]
+    },
+    "Attempt": {
+      "title": "Attempt",
+      "description": "Lịch sử làm bài và kết quả chấm điểm theo chuẩn Certiport All-or-Nothing",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã lượt thi",
+          "maxLength": 64
+        },
+        "userId": {
+          "type": "string",
+          "description": "Mã học sinh thực hiện bài thi",
+          "maxLength": 64
+        },
+        "username": {
+          "type": "string",
+          "description": "Mã đăng nhập của học sinh",
+          "maxLength": 64
+        },
+        "fullName": {
+          "type": "string",
+          "description": "Họ tên học sinh",
+          "maxLength": 120
+        },
+        "mode": {
+          "type": "string",
+          "description": "Chế độ thi hoặc tên bộ đề",
+          "maxLength": 120
+        },
+        "score": {
+          "type": "number",
+          "description": "Số câu trả lời đúng tuyệt đối"
+        },
+        "totalQuestions": {
+          "type": "number",
+          "description": "Tổng số câu hỏi trong bài"
+        },
+        "percentage": {
+          "type": "number",
+          "description": "Tỷ lệ phần trăm hoàn thành đúng"
+        },
+        "passed": {
+          "type": "boolean",
+          "description": "Trạng thái Đạt (>= 70%) hay Chưa đạt"
+        },
+        "durationSeconds": {
+          "type": "number",
+          "description": "Thời gian làm bài tính bằng giây"
+        },
+        "completedAt": {
+          "type": "string",
+          "description": "Thời điểm nộp bài (ISO 8601)",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "username",
+        "fullName",
+        "totalQuestions",
+        "durationSeconds",
+        "completedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Lưu trữ danh sách tài khoản Giáo viên và Học sinh cùng trạng thái hoạt động, thời gian ôn tập, câu Bookmark và Kho câu sai"
+    },
+    "/questions/{questionId}": {
+      "schema": { "$ref": "#/entities/Question" },
+      "description": "Ngân hàng câu hỏi chuẩn Certiport Generative AI (5 dạng tương tác)"
+    },
+    "/attempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/Attempt" },
+      "description": "Kết quả các lượt luyện thi của học sinh"
+    }
+  }
+}
