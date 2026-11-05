@@ -8,9 +8,11 @@ import {
   evaluateQuestion,
   filterPracticeQuestions,
   formatCountdownClock,
+  formatPracticeTimerLabel,
   getCorrectAnswerBreakdown,
   getUserAnswerBreakdown,
   isQuestionAnswered,
+  resolvePracticeSessionPool,
 } from './scoring';
 import {
   SEED_ATTEMPTS,
@@ -289,4 +291,52 @@ test('formatCountdownClock formats 50-minute timer accurately', () => {
   assert.equal(formatCountdownClock(5), '00:05');
   assert.equal(formatCountdownClock(0), '00:00');
 });
+
+test('resolvePracticeSessionPool supports choosing ALL questions or a custom number of questions', () => {
+  const allResult = resolvePracticeSessionPool(FIXTURE_QUESTIONS, {
+    questionCountMode: 'ALL',
+    customQuestionCount: 8,
+    timeLimitMinutes: 0,
+    shuffleQuestions: false,
+    focusMode: true,
+  });
+  assert.equal(allResult.questions.length, FIXTURE_QUESTIONS.length);
+  assert.deepEqual(
+    allResult.questions.map((q) => q.id),
+    FIXTURE_QUESTIONS.map((q) => q.id)
+  );
+
+  const customResult = resolvePracticeSessionPool(FIXTURE_QUESTIONS, {
+    questionCountMode: 'CUSTOM',
+    customQuestionCount: 4,
+    timeLimitMinutes: 15,
+    shuffleQuestions: true,
+    focusMode: true,
+  });
+  assert.equal(customResult.questions.length, 4);
+  assert.equal(customResult.targetCount, 4);
+});
+
+test('formatPracticeTimerLabel handles unlimited time (0 min) and countdown timers', () => {
+  const unlimited = formatPracticeTimerLabel(0, 125);
+  assert.equal(unlimited.isUnlimited, true);
+  assert.equal(unlimited.displayClock, '02:05');
+  assert.equal(unlimited.isWarning, false);
+  assert.equal(unlimited.isExpired, false);
+
+  const countdownNormal = formatPracticeTimerLabel(30, 600);
+  assert.equal(countdownNormal.isUnlimited, false);
+  assert.equal(countdownNormal.displayClock, '20:00');
+  assert.equal(countdownNormal.isWarning, false);
+  assert.equal(countdownNormal.isExpired, false);
+
+  const countdownWarning = formatPracticeTimerLabel(30, 1600); // 200s remaining (< 300s)
+  assert.equal(countdownWarning.isWarning, true);
+  assert.equal(countdownWarning.isExpired, false);
+
+  const countdownExpired = formatPracticeTimerLabel(15, 900);
+  assert.equal(countdownExpired.isExpired, true);
+  assert.equal(countdownExpired.displayClock, '00:00');
+});
+
 

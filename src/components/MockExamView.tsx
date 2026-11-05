@@ -39,7 +39,7 @@ import {
   getUserAnswerBreakdown,
   isQuestionAnswered,
 } from '../utils/scoring';
-import { QuestionRenderer } from './QuestionRenderer';
+import { QuestionFontScale, QuestionRenderer } from './QuestionRenderer';
 import { formatStudyDuration } from './StudentPortal';
 
 interface MockExamViewProps {
@@ -49,6 +49,11 @@ interface MockExamViewProps {
   onToggleBookmark: (questionId: string) => Promise<void>;
   onSaveAttempt: (attempt: ExamAttempt, wrongQuestionIds: string[]) => Promise<void>;
   onOpenMistakesTab: () => void;
+  fontScale?: QuestionFontScale;
+  onChangeFontScale?: (scale: QuestionFontScale) => void;
+  isFocusMode?: boolean;
+  onToggleFocusMode?: () => void;
+  onExamPhaseChange?: (inProgress: boolean) => void;
 }
 
 type MockExamPhase = 'intro' | 'in_progress' | 'submitted';
@@ -61,11 +66,21 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
   onToggleBookmark,
   onSaveAttempt,
   onOpenMistakesTab,
+  fontScale = 'large',
+  onChangeFontScale,
+  isFocusMode = false,
+  onToggleFocusMode,
+  onExamPhaseChange,
 }) => {
   const [phase, setPhase] = useState<MockExamPhase>('intro');
   const [desiredQuestionCount, setDesiredQuestionCount] = useState<number>(
     MOCK_EXAM_MAX_QUESTIONS
   );
+  // 50 phút chuẩn Certiport (0 = Không giới hạn thời gian)
+  const [desiredTimeMinutes, setDesiredTimeMinutes] = useState<number>(50);
+  const [elapsedExamSeconds, setElapsedExamSeconds] = useState<number>(0);
+  const [isNavigatorCollapsed, setIsNavigatorCollapsed] = useState<boolean>(false);
+
   const [examQuestions, setExamQuestions] = useState<Question[]>(() =>
     buildMockExamQuestionPool(questionsBank, MOCK_EXAM_MAX_QUESTIONS)
   );
@@ -81,6 +96,10 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
   const [selectedReviewIndex, setSelectedReviewIndex] = useState<number>(0);
 
   const isSubmittingRef = useRef(false);
+
+  useEffect(() => {
+    onExamPhaseChange?.(phase === 'in_progress');
+  }, [phase, onExamPhaseChange]);
 
   // Xem trước tỷ lệ bốc câu hỏi theo Chuyên đề trong Ngân hàng
   const proportionalPreview = useMemo(
@@ -100,11 +119,14 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
       questionsBank,
       desiredQuestionCount
     );
+    const configuredDurationSec =
+      desiredTimeMinutes > 0 ? desiredTimeMinutes * 60 : 0;
     setExamQuestions(drawResult.questions);
     setCurrentIndex(0);
     setUserAnswers({});
     setFlaggedMap({});
-    setRemainingSeconds(MOCK_EXAM_DURATION_SECONDS);
+    setElapsedExamSeconds(0);
+    setRemainingSeconds(configuredDurationSec);
     setShowConfirmSubmitModal(false);
     setAutoSubmittedOnTimeout(false);
     setReviewFilter('ALL');
@@ -112,7 +134,7 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
     isSubmittingRef.current = false;
     setPhase('in_progress');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [questionsBank, desiredQuestionCount]);
+  }, [questionsBank, desiredQuestionCount, desiredTimeMinutes]);
 
   // Hàm thực thi nộp bài chính thức & lưu lên Firestore
   const finalizeAndSubmitExam = useCallback(
@@ -126,10 +148,14 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
       window.scrollTo({ top: 0, behavior: 'smooth' });
 
       const summary = evaluateExamSet(examQuestions, userAnswers, flaggedMap);
-      const elapsedSeconds = Math.max(
-        1,
-        MOCK_EXAM_DURATION_SECONDS - remainingSeconds
-      );
+      const configuredLimitSeconds =
+        desiredTimeMinutes > 0 ? desiredTimeMinutes * 60 : 0;
+      const computedDuration =
+        configuredLimitSeconds > 0
+          ? isTimeoutAutoSubmit
+            ? configuredLimitSeconds
+            : Math.max(1, configuredLimitSeconds - remainingSeconds)
+          : Math.max(1, elapsedExamSeconds);
 
       const attemptPayload: ExamAttempt = {
         id: `mock_${Date.now()}_${currentUser.id}`,
@@ -139,7 +165,9 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
         examSet: `Đề Thi thử Ngẫu nhiên (${summary.totalQuestions} câu)`,
         mode: isTimeoutAutoSubmit
           ? `Thi thử Certiport (${summary.totalQuestions} câu · Tự động nộp khi hết giờ)`
-          : `Thi thử Certiport (${summary.totalQuestions} câu chuẩn)`,
+          : desiredTimeMinutes === 0
+            ? `Thi thử Certiport (${summary.totalQuestions} câu · Không giới hạn thời gian)`
+            : `Thi thử Certiport (${summary.totalQuestions} câu · ${desiredTimeMinutes} phút)`,
         correctCount: summary.score,
         score: summary.score,
         totalQuestions: summary.totalQuestions,
@@ -151,10 +179,8 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
         questionResults: summary.questionResults,
         topicBreakdown: summary.topicBreakdown,
         typeBreakdown: summary.typeBreakdown,
-        durationSeconds: isTimeoutAutoSubmit
-          ? MOCK_EXAM_DURATION_SECONDS
-          : elapsedSeconds,
-        timeLimitSeconds: MOCK_EXAM_DURATION_SECONDS,
+        durationSeconds: computedDuration,
+        timeLimitSeconds: configuredLimitSeconds || MOCK_EXAM_DURATION_SECONDS,
         autoSubmittedOnTimeout: isTimeoutAutoSubmit,
         completedAt: new Date().toISOString(),
       };
@@ -166,6 +192,8 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
       userAnswers,
       flaggedMap,
       remainingSeconds,
+      elapsedExamSeconds,
+      desiredTimeMinutes,
       currentUser,
       onSaveAttempt,
     ]
@@ -176,26 +204,55 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
     finalizeRef.current = finalizeAndSubmitExam;
   }, [finalizeAndSubmitExam]);
 
-  // Đồng hồ đếm ngược 50 phút (3000 giây) -> tự động nộp bài khi về 00:00
+  // Đồng hồ đếm ngược (hoặc đếm tăng nếu chọn Không giới hạn thời gian)
   useEffect(() => {
     if (phase !== 'in_progress') return;
 
     const timer = window.setInterval(() => {
-      setRemainingSeconds((prev) => {
-        if (prev <= 1) {
-          window.clearInterval(timer);
-          finalizeRef.current(true);
-          return 0;
-        }
-        return prev - 1;
-      });
+      setElapsedExamSeconds((e) => e + 1);
+      if (desiredTimeMinutes > 0) {
+        setRemainingSeconds((prev) => {
+          if (prev <= 1) {
+            window.clearInterval(timer);
+            finalizeRef.current(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [phase]);
+  }, [phase, desiredTimeMinutes]);
+
+  // Phím tắt bàn phím nhanh (← Câu trước, → Câu tiếp theo) khi đang trong phòng thi
+  useEffect(() => {
+    if (phase !== 'in_progress' || showConfirmSubmitModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT')
+      ) {
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setCurrentIndex((i) => Math.max(0, i - 1));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setCurrentIndex((i) => Math.min(examQuestions.length - 1, i + 1));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [phase, showConfirmSubmitModal, examQuestions.length]);
 
   const activeQuestion = examQuestions[currentIndex] ?? examQuestions[0] ?? null;
   const isUnderFiveMinutes =
+    desiredTimeMinutes > 0 &&
     remainingSeconds <= MOCK_EXAM_WARNING_THRESHOLD_SECONDS;
 
   // Danh sách câu hỏi chưa trả lời để cảnh báo trong hộp thoại xác nhận nộp bài
@@ -245,26 +302,26 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
       <div className="space-y-6">
         <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 shadow-2xs space-y-6">
           <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-6">
-            <div className="space-y-2 max-w-3xl">
+            <div className="space-y-2 max-w-2xl">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-teal-50 border border-teal-200 text-xs font-bold text-teal-800">
                 <Award className="w-4 h-4" />
-                <span>CHẾ ĐỘ THI THỬ · BỐC NGẪU NHIÊN THEO TỈ LỆ NGÂN HÀNG ĐỀ</span>
+                <span>CHẾ ĐỘ THI THỬ · GIAO DIỆN PHÒNG THI TẬP TRUNG</span>
               </div>
               <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
                 Bài Thi Thử Chứng Chỉ Certiport Generative AI
               </h2>
               <p className="text-sm text-slate-600 leading-relaxed">
-                Mỗi lần bấm bắt đầu, hệ thống tự động <strong>bốc ngẫu nhiên câu hỏi theo đúng tỉ lệ Chuyên đề và Dạng câu hỏi hiện có trong Ngân hàng câu hỏi</strong>, xáo trộn thứ tự, giới hạn 50 phút đếm ngược và chấm điểm theo thang 1000 (All-or-Nothing).
+                Hệ thống tự động <strong>bốc ngẫu nhiên câu hỏi theo đúng tỉ lệ Chuyên đề trong Ngân hàng đề</strong>, tối ưu giao diện tập trung không xao nhãng và chấm điểm theo thang 1000 (All-or-Nothing).
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <div className="flex flex-wrap items-end gap-3 shrink-0">
               <div>
                 <label
                   htmlFor="mock-exam-count-select"
                   className="block text-[11px] font-bold text-slate-600 mb-1"
                 >
-                  Số câu muốn bốc theo tỉ lệ:
+                  1. Chọn số câu hỏi:
                 </label>
                 <select
                   id="mock-exam-count-select"
@@ -276,13 +333,33 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                 >
                   {countOptions.map((cnt) => (
                     <option key={cnt} value={cnt}>
-                      {cnt === MOCK_EXAM_MAX_QUESTIONS
+                      {cnt === MOCK_EXAM_MAX_QUESTIONS && cnt !== questionsBank.length
                         ? `Chuẩn Certiport (${Math.min(cnt, questionsBank.length)} câu theo tỉ lệ)`
                         : cnt === questionsBank.length
-                          ? `Toàn bộ ngân hàng (${cnt} câu)`
+                          ? `Làm tất cả các câu (${cnt} câu)`
                           : `Đề ${cnt} câu (bốc theo tỉ lệ ngân hàng)`}
                     </option>
                   ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="mock-exam-time-select"
+                  className="block text-[11px] font-bold text-slate-600 mb-1"
+                >
+                  2. Thời gian làm bài:
+                </label>
+                <select
+                  id="mock-exam-time-select"
+                  value={desiredTimeMinutes}
+                  onChange={(e) => setDesiredTimeMinutes(parseInt(e.target.value, 10) || 0)}
+                  className="px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-xs sm:text-sm font-bold text-slate-900"
+                >
+                  <option value={50}>50 phút (Chuẩn phòng thi Certiport)</option>
+                  <option value={30}>30 phút (Luyện tốc độ)</option>
+                  <option value={60}>60 phút (Mở rộng)</option>
+                  <option value={0}>∞ Không giới hạn thời gian</option>
                 </select>
               </div>
 
@@ -291,13 +368,13 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                 data-testid="start-mock-exam-btn"
                 disabled={questionsBank.length === 0}
                 onClick={handleStartNewMockExam}
-                className="px-6 py-3.5 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-sm sm:text-base font-bold transition-all inline-flex items-center gap-2.5 shadow-sm cursor-pointer shrink-0 mt-auto"
+                className="px-6 py-3 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-sm sm:text-base font-bold transition-all inline-flex items-center gap-2.5 shadow-sm cursor-pointer shrink-0"
               >
                 <PlayCircle className="w-5 h-5" />
                 <span>
                   {questionsBank.length === 0
                     ? 'Ngân hàng đề đang trống (0 câu)'
-                    : `Bốc đề & Bắt đầu Thi thử (${targetQuestionCount} câu)`}
+                    : `Vào Phòng Thi (${targetQuestionCount} câu)`}
                 </span>
               </button>
             </div>
@@ -321,13 +398,17 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
               <div className="flex items-center gap-2 text-xs font-bold text-teal-800">
                 <Clock className="w-4 h-4" />
-                <span>THỜI GIAN ĐẾM NGƯỢC</span>
+                <span>THỜI GIAN LÀM BÀI</span>
               </div>
               <div className="text-xl font-bold font-mono text-slate-900">
-                50 phút (50:00)
+                {desiredTimeMinutes > 0
+                  ? `${desiredTimeMinutes} phút (${desiredTimeMinutes}:00)`
+                  : '∞ Không giới hạn'}
               </div>
               <p className="text-xs text-slate-600">
-                Đổi màu cảnh báo đỏ khi còn dưới 5 phút và tự động nộp bài ngay khi hết giờ.
+                {desiredTimeMinutes > 0
+                  ? 'Đổi màu cảnh báo đỏ khi còn dưới 5 phút và tự động nộp bài ngay khi hết giờ.'
+                  : 'Cho phép làm bài thoải mái không giới hạn thời gian cho đến khi bấm Nộp bài.'}
               </p>
             </div>
 
@@ -347,13 +428,13 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
               <div className="flex items-center gap-2 text-xs font-bold text-teal-800">
                 <ShieldAlert className="w-4 h-4" />
-                <span>CHẾ ĐỘ BẢO MẬT PHÒNG THI</span>
+                <span>GIAO DIỆN TẬP TRUNG CAO</span>
               </div>
               <div className="text-xl font-bold font-mono text-slate-900">
-                Ẩn đáp án 100%
+                Focus Mode + Cỡ chữ
               </div>
               <p className="text-xs text-slate-600">
-                Tuyệt đối không hiển thị đúng/sai trong lúc làm bài. Chỉ công bố sau khi Nộp bài.
+                Tự động thu gọn thanh phụ, hỗ trợ phóng chữ (A-/A/A+) và phím tắt điều hướng nhanh.
               </p>
             </div>
           </div>
@@ -405,75 +486,170 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
   }
 
   // ===========================================================================
-  // GIAI ĐOẠN 2: ĐANG LÀM BÀI THI THỬ (IN PROGRESS — STICKY TIMER + NAVIGATOR)
+  // GIAI ĐOẠN 2: ĐANG LÀM BÀI THI THỬ (IN PROGRESS — FOCUS ROOM + STICKY BAR)
   // ===========================================================================
   if (phase === 'in_progress') {
+    const progressPercent =
+      examQuestions.length > 0
+        ? Math.round((evaluation.answeredCount / examQuestions.length) * 100)
+        : 0;
+
     return (
-      <div className="space-y-6">
-        {/* Thanh Header Phòng Thi Cố Định (Sticky Countdown Bar ở góc trên màn hình) */}
+      <div data-testid="mock-exam-focus-workspace" className="space-y-4">
+        {/* Thanh Header Phòng Thi Tập Trung (Sticky Countdown & Focus Controls) */}
         <div
           data-testid="mock-exam-sticky-bar"
-          className={`sticky top-[57px] z-20 rounded-xl border p-4 shadow-sm transition-colors flex flex-wrap items-center justify-between gap-4 ${
+          className={`sticky ${
+            isFocusMode ? 'top-2' : 'top-[57px]'
+          } z-20 rounded-xl border p-3.5 sm:px-5 shadow-sm transition-colors space-y-2.5 ${
             isUnderFiveMinutes
               ? 'bg-rose-50 border-rose-400'
               : 'bg-white/95 backdrop-blur-xs border-slate-200'
           }`}
         >
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="px-3 py-1.5 rounded-lg bg-teal-800 text-white text-xs font-bold tracking-wide">
-              PHÒNG THI THỬ CERTIPORT
-            </span>
-            <div className="text-xs sm:text-sm font-medium text-slate-700 tabular-nums">
-              Đã làm:{' '}
-              <strong className="font-mono text-teal-800">
-                {evaluation.answeredCount} / {examQuestions.length}
-              </strong>{' '}
-              · Chưa làm:{' '}
-              <strong className="font-mono text-slate-900">
-                {evaluation.unansweredCount}
-              </strong>{' '}
-              · Gắn cờ xem lại:{' '}
-              <strong className="font-mono text-amber-700">
-                {evaluation.flaggedCount}
-              </strong>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="px-3 py-1.5 rounded-lg bg-teal-800 text-white text-xs font-bold tracking-wide">
+                PHÒNG THI CERTIPORT · CÂU {currentIndex + 1}/{examQuestions.length}
+              </span>
+              <div className="text-xs sm:text-sm font-medium text-slate-700 tabular-nums">
+                Đã làm:{' '}
+                <strong className="font-mono text-teal-800">
+                  {evaluation.answeredCount}/{examQuestions.length}
+                </strong>{' '}
+                ({progressPercent}%) · Chưa làm:{' '}
+                <strong className="font-mono text-slate-900">
+                  {evaluation.unansweredCount}
+                </strong>{' '}
+                · Gắn cờ:{' '}
+                <strong className="font-mono text-amber-700">
+                  {evaluation.flaggedCount}
+                </strong>
+              </div>
+            </div>
+
+            {/* Bộ công cụ Tối ưu Quan sát (Cỡ chữ A-/A/A+, Ẩn/Hiện Bảng câu hỏi, Chế độ Tập trung) + Đồng hồ */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Tùy chỉnh cỡ chữ đề thi */}
+              {onChangeFontScale && (
+                <div
+                  className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs"
+                  role="group"
+                  aria-label="Chỉnh cỡ chữ đề thi"
+                >
+                  <button
+                    type="button"
+                    onClick={() => onChangeFontScale('normal')}
+                    className={`px-2 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                      fontScale === 'normal'
+                        ? 'bg-white text-teal-800 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    A-
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChangeFontScale('large')}
+                    className={`px-2 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                      fontScale === 'large'
+                        ? 'bg-white text-teal-800 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    A
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChangeFontScale('xlarge')}
+                    className={`px-2 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                      fontScale === 'xlarge'
+                        ? 'bg-white text-teal-800 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    A+
+                  </button>
+                </div>
+              )}
+
+              {/* Nút Mở rộng / Thu gọn bảng danh sách câu hỏi */}
+              <button
+                type="button"
+                onClick={() => setIsNavigatorCollapsed((prev) => !prev)}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+              >
+                {isNavigatorCollapsed
+                  ? 'Hiện bảng câu hỏi (1→N)'
+                  : 'Mở rộng khung đề (Ẩn bảng số)'}
+              </button>
+
+              {onToggleFocusMode && (
+                <button
+                  type="button"
+                  onClick={onToggleFocusMode}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                    isFocusMode
+                      ? 'border-teal-600 bg-teal-50 text-teal-900'
+                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {isFocusMode ? 'Hiện thanh menu trên' : 'Tập trung tối đa'}
+                </button>
+              )}
+
+              <div
+                data-testid="mock-exam-countdown"
+                className={`px-3.5 py-2 rounded-lg font-mono text-xs sm:text-sm font-bold tabular-nums inline-flex items-center gap-2 transition-all ${
+                  isUnderFiveMinutes
+                    ? 'bg-rose-600 text-white ring-2 ring-rose-300 animate-pulse'
+                    : 'bg-slate-900 text-white'
+                }`}
+              >
+                <Clock className="w-4 h-4 shrink-0" />
+                <span>
+                  {desiredTimeMinutes > 0
+                    ? `Còn lại: ${formatCountdownClock(remainingSeconds)}`
+                    : `∞ Tự do · ${formatCountdownClock(elapsedExamSeconds)}`}
+                </span>
+                {isUnderFiveMinutes && (
+                  <span className="text-[11px] bg-white text-rose-700 px-1.5 py-0.5 rounded font-sans font-bold">
+                    &lt; 5 PHÚT!
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                data-testid="open-submit-modal-btn"
+                onClick={() => setShowConfirmSubmitModal(true)}
+                className="px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-bold transition-colors inline-flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+                <span>Nộp bài</span>
+              </button>
             </div>
           </div>
 
-          {/* Đồng hồ đếm ngược 50 phút cố định ở góc trên + Đổi màu cảnh báo khi < 5 phút */}
-          <div className="flex flex-wrap items-center gap-3">
+          {/* Thanh tiến độ trực quan mỏng */}
+          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
-              data-testid="mock-exam-countdown"
-              className={`px-4 py-2 rounded-lg font-mono text-sm sm:text-base font-bold tabular-nums inline-flex items-center gap-2 transition-all ${
-                isUnderFiveMinutes
-                  ? 'bg-rose-600 text-white ring-2 ring-rose-300 animate-pulse'
-                  : 'bg-slate-900 text-white'
-              }`}
-            >
-              <Clock className="w-4 h-4 shrink-0" />
-              <span>Thời gian còn lại: {formatCountdownClock(remainingSeconds)}</span>
-              {isUnderFiveMinutes && (
-                <span className="text-[11px] bg-white text-rose-700 px-1.5 py-0.5 rounded font-sans font-bold">
-                  &lt; 5 PHÚT!
-                </span>
-              )}
-            </div>
-
-            <button
-              type="button"
-              data-testid="open-submit-modal-btn"
-              onClick={() => setShowConfirmSubmitModal(true)}
-              className="px-5 py-2.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-bold transition-colors inline-flex items-center gap-2 shadow-2xs cursor-pointer"
-            >
-              <Send className="w-4 h-4" />
-              <span>Nộp bài</span>
-            </button>
+              className="h-full bg-teal-600 transition-all duration-200 rounded-full"
+              style={{ width: `${progressPercent}%` }}
+            />
           </div>
         </div>
 
-        {/* Giao diện 2 cột trong lúc thi */}
+        {/* Giao diện Phòng Thi Tập Trung (Mở rộng 12/12 khi thu gọn bảng câu hỏi hoặc 8/12 + 4/12) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Cột trái (8/12): Hiển thị câu hỏi (TUYỆT ĐỐI KHÔNG HIỂN THỊ ĐÁP ÁN HAY ĐÚNG/SAI) */}
-          <div className="lg:col-span-8 space-y-4">
+          {/* Cột hiển thị câu hỏi (TUYỆT ĐỐI KHÔNG HIỂN THỊ ĐÁP ÁN HAY ĐÚNG/SAI) */}
+          <div
+            className={`${
+              isNavigatorCollapsed
+                ? 'lg:col-span-12 max-w-5xl w-full mx-auto'
+                : 'lg:col-span-8'
+            } space-y-4`}
+          >
             {activeQuestion && (
               <>
                 <QuestionRenderer
@@ -491,6 +667,7 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                   readOnly={false}
                   isBookmarked={bookmarkedIds.includes(activeQuestion.id)}
                   onToggleBookmark={(qId) => onToggleBookmark(qId)}
+                  fontScale={fontScale}
                 />
 
                 {/* Thanh điều hướng câu hỏi & Nút Gắn cờ xem lại (Mark for Review) */}
@@ -500,9 +677,9 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                       type="button"
                       disabled={currentIndex === 0}
                       onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
-                      className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                      className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs sm:text-sm font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
                     >
-                      <ChevronLeft className="w-4 h-4" /> Câu trước
+                      <ChevronLeft className="w-4 h-4" /> Câu trước (←)
                     </button>
 
                     <button
@@ -513,9 +690,9 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                           Math.min(examQuestions.length - 1, i + 1)
                         )
                       }
-                      className="px-4 py-2.5 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-xs font-semibold text-white inline-flex items-center gap-1 cursor-pointer"
+                      className="px-4 py-2.5 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-xs sm:text-sm font-semibold text-white inline-flex items-center gap-1 cursor-pointer"
                     >
-                      Câu tiếp theo <ChevronRight className="w-4 h-4" />
+                      Câu tiếp theo (→) <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
 
@@ -554,99 +731,100 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
             )}
           </div>
 
-          {/* Cột phải (4/12): Bảng Danh sách Câu hỏi (Question Navigator 1 -> 45) */}
-          <aside className="lg:col-span-4 bg-white border border-slate-200 rounded-xl p-5 space-y-5">
-            <div className="space-y-1">
-              <h3 className="text-sm font-bold text-slate-900">
-                Bảng Danh sách Câu hỏi (Question Navigator 1 → {examQuestions.length})
-              </h3>
-              <p className="text-xs text-slate-500">
-                Bấm vào số thứ tự bất kỳ để chuyển nhanh tới câu hỏi đó.
-              </p>
-            </div>
-
-            {/* Chú giải 3 màu sắc rõ ràng: Đã làm | Chưa làm | Gắn cờ xem lại */}
-            <div className="grid grid-cols-3 gap-2 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs tabular-nums">
-              <div className="flex items-center gap-1.5">
-                <span className="w-3.5 h-3.5 rounded bg-teal-600 border border-teal-700 shrink-0" />
-                <span className="text-slate-700 font-medium">
-                  Đã làm ({evaluation.answeredCount})
-                </span>
+          {/* Cột phải (4/12): Bảng Danh sách Câu hỏi (Question Navigator 1 -> N) */}
+          {!isNavigatorCollapsed && (
+            <aside className="lg:col-span-4 bg-white border border-slate-200 rounded-xl p-5 space-y-5 sticky top-28">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Bảng Danh sách Câu hỏi (1 → {examQuestions.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Bấm vào số thứ tự bất kỳ hoặc dùng phím ← / → để chuyển nhanh.
+                </p>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3.5 h-3.5 rounded bg-white border border-slate-300 shrink-0" />
-                <span className="text-slate-700 font-medium">
-                  Chưa làm ({evaluation.unansweredCount})
-                </span>
+
+              {/* Chú giải 3 màu sắc rõ ràng: Đã làm | Chưa làm | Gắn cờ xem lại */}
+              <div className="grid grid-cols-3 gap-2 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs tabular-nums">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3.5 h-3.5 rounded bg-teal-600 border border-teal-700 shrink-0" />
+                  <span className="text-slate-700 font-medium">
+                    Đã làm ({evaluation.answeredCount})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3.5 h-3.5 rounded bg-white border border-slate-300 shrink-0" />
+                  <span className="text-slate-700 font-medium">
+                    Chưa làm ({evaluation.unansweredCount})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3.5 h-3.5 rounded bg-amber-200 border border-amber-500 shrink-0" />
+                  <span className="text-amber-900 font-medium">
+                    Gắn cờ ({evaluation.flaggedCount})
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3.5 h-3.5 rounded bg-amber-200 border border-amber-500 shrink-0" />
-                <span className="text-amber-900 font-medium">
-                  Gắn cờ ({evaluation.flaggedCount})
-                </span>
+
+              {/* Lưới nút câu hỏi 1 -> N (có thanh cuộn gọn nếu đề tất cả các câu > 60 câu) */}
+              <div className="grid grid-cols-5 gap-2 max-h-[380px] overflow-y-auto pr-1">
+                {examQuestions.map((q, idx) => {
+                  const isCurrent = idx === currentIndex;
+                  const answered = isQuestionAnswered(q, userAnswers[q.id]);
+                  const flagged = Boolean(flaggedMap[q.id]);
+
+                  let cellStyle =
+                    'bg-white border-slate-300 text-slate-700 hover:border-teal-600';
+                  if (flagged) {
+                    cellStyle =
+                      'bg-amber-100 border-amber-500 text-amber-950 font-bold';
+                  } else if (answered) {
+                    cellStyle =
+                      'bg-teal-600 border-teal-700 text-white font-bold';
+                  }
+
+                  if (isCurrent) {
+                    cellStyle += ' ring-2 ring-slate-900 ring-offset-1';
+                  }
+
+                  return (
+                    <button
+                      key={q.id}
+                      type="button"
+                      aria-label={`Chuyển đến câu ${idx + 1}${
+                        flagged
+                          ? ' (Đang gắn cờ xem lại)'
+                          : answered
+                            ? ' (Đã trả lời)'
+                            : ' (Chưa làm)'
+                      }`}
+                      onClick={() => setCurrentIndex(idx)}
+                      className={`py-2 px-1 rounded-lg border text-xs font-mono tabular-nums transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer ${cellStyle}`}
+                    >
+                      <span>{idx + 1}</span>
+                      <span className="text-[9px] font-sans leading-none">
+                        {flagged ? '⚑ Cờ' : answered ? '✓ Đã làm' : 'Trống'}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-            </div>
 
-            {/* Lưới nút câu hỏi 1 -> N */}
-            <div className="grid grid-cols-5 gap-2">
-              {examQuestions.map((q, idx) => {
-                const isCurrent = idx === currentIndex;
-                const answered = isQuestionAnswered(q, userAnswers[q.id]);
-                const flagged = Boolean(flaggedMap[q.id]);
-
-                // Phân biệt rõ 3 màu sắc: Gắn cờ xem lại | Đã làm | Chưa làm
-                let cellStyle =
-                  'bg-white border-slate-300 text-slate-700 hover:border-teal-600';
-                if (flagged) {
-                  cellStyle =
-                    'bg-amber-100 border-amber-500 text-amber-950 font-bold';
-                } else if (answered) {
-                  cellStyle =
-                    'bg-teal-600 border-teal-700 text-white font-bold';
-                }
-
-                if (isCurrent) {
-                  cellStyle += ' ring-2 ring-slate-900 ring-offset-1';
-                }
-
-                return (
-                  <button
-                    key={q.id}
-                    type="button"
-                    aria-label={`Chuyển đến câu ${idx + 1}${
-                      flagged
-                        ? ' (Đang gắn cờ xem lại)'
-                        : answered
-                          ? ' (Đã trả lời)'
-                          : ' (Chưa làm)'
-                    }`}
-                    onClick={() => setCurrentIndex(idx)}
-                    className={`py-2 px-1 rounded-lg border text-xs font-mono tabular-nums transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer ${cellStyle}`}
-                  >
-                    <span>{idx + 1}</span>
-                    <span className="text-[9px] font-sans leading-none">
-                      {flagged ? '⚑ Cờ' : answered ? '✓ Đã làm' : 'Trống'}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="pt-3 border-t border-slate-200 space-y-3">
-              <div className="text-xs text-slate-500 leading-relaxed">
-                Lưu ý: Trong chế độ Thi thử, hệ thống ẩn toàn bộ gợi ý và kết quả đúng/sai cho
-                đến khi bạn xác nhận nộp bài.
+              <div className="pt-3 border-t border-slate-200 space-y-3">
+                <div className="text-xs text-slate-500 leading-relaxed">
+                  Lưu ý: Trong chế độ Thi thử, hệ thống ẩn toàn bộ gợi ý và kết quả đúng/sai cho
+                  đến khi bạn xác nhận nộp bài.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmSubmitModal(true)}
+                  className="w-full py-2.5 px-4 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold transition-colors inline-flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Hoàn tất & Nộp bài thi</span>
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowConfirmSubmitModal(true)}
-                className="w-full py-2.5 px-4 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold transition-colors inline-flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Hoàn tất & Nộp bài thi</span>
-              </button>
-            </div>
-          </aside>
+            </aside>
+          )}
         </div>
 
         {/* Hộp thoại Xác nhận Nộp bài & Cảnh báo nếu còn câu chưa làm */}

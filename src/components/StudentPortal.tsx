@@ -5,12 +5,16 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Eye,
   Filter,
   History,
   LogOut,
+  Maximize2,
+  Minimize2,
   PlayCircle,
   RotateCcw,
+  Settings2,
   Shuffle,
   Sparkles,
   Star,
@@ -29,14 +33,15 @@ import {
   UserAnswer,
 } from '../types/exam';
 import {
-  buildProportionalExamPool,
   evaluateQuestion,
   filterPracticeQuestions,
+  formatPracticeTimerLabel,
   getCorrectAnswerBreakdown,
   getUserAnswerBreakdown,
+  resolvePracticeSessionPool,
 } from '../utils/scoring';
 import { MockExamView } from './MockExamView';
-import { QuestionRenderer } from './QuestionRenderer';
+import { QuestionFontScale, QuestionRenderer } from './QuestionRenderer';
 
 interface StudentPortalProps {
   currentUser: UserAccount;
@@ -94,13 +99,30 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   });
 
   // ============================================================================
-  // 1. STATE CHO CHẾ ĐỘ LUYỆN TẬP (LỌC CHUYÊN ĐỀ / DẠNG BÀI + BỐC ĐỀ NGẪU NHIÊN THEO TỈ LỆ)
+  // 1. STATE CHO CHẾ ĐỘ LUYỆN TẬP & HỘP THOẠI CẤU HÌNH TRƯỚC KHI VÀO LÀM
   // ============================================================================
   const [practiceTopic, setPracticeTopic] = useState<string>('ALL');
   const [practiceType, setPracticeType] = useState<QuestionTypeFilter>('ALL');
   const [practiceDrawSize, setPracticeDrawSize] = useState<string>('ALL');
+  const [practiceCustomCount, setPracticeCustomCount] = useState<number>(35);
+  const [practiceTimeMinutes, setPracticeTimeMinutes] = useState<number>(0); // 0 = Không giới hạn thời gian
+  const [practiceShuffle, setPracticeShuffle] = useState<boolean>(true);
   const [practiceDrawSeed, setPracticeDrawSeed] = useState<number>(0);
   const [onlyBookmarked, setOnlyBookmarked] = useState<boolean>(false);
+
+  // Hộp thoại xuất hiện trước khi vào làm ở Chế độ Luyện tập
+  const [isPracticeSetupOpen, setIsPracticeSetupOpen] = useState<boolean>(true);
+  const [isPracticeSessionActive, setIsPracticeSessionActive] = useState<boolean>(false);
+  const [practiceElapsedSeconds, setPracticeElapsedSeconds] = useState<number>(0);
+  const [showFilterDrawerInPractice, setShowFilterDrawerInPractice] =
+    useState<boolean>(false);
+
+  // Tối ưu hiển thị Giao diện Tập trung (Focus Mode) dùng chung cho Luyện tập & Thi thử
+  const [fontScale, setFontScale] = useState<QuestionFontScale>('large');
+  const [isFocusMode, setIsFocusMode] = useState<boolean>(true);
+  const [isZenHeaderHidden, setIsZenHeaderHidden] = useState<boolean>(false);
+  const [isPracticeNavCollapsed, setIsPracticeNavCollapsed] = useState<boolean>(false);
+  const [isMockExamInProgress, setIsMockExamInProgress] = useState<boolean>(false);
 
   const [practiceIndex, setPracticeIndex] = useState<number>(0);
   const [practiceAnswers, setPracticeAnswers] = useState<Record<string, UserAnswer>>({});
@@ -192,34 +214,120 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     );
   }, [questions, practiceTopic, practiceType, onlyBookmarked, bookmarkedIds]);
 
-  // Nếu học sinh chọn bốc đề ngẫu nhiên theo tỉ lệ ngân hàng (VD: 5, 10, 20, 35, 45 câu)
+  // Rút trích bộ câu hỏi cho phiên Luyện tập theo lựa chọn của Học sinh (Tất cả các câu hoặc Số câu tùy chọn)
   const practiceDrawResult = useMemo(() => {
-    // Tham chiếu practiceDrawSeed để cho phép bấm "Bốc lại đề ngẫu nhiên mới"
     void practiceDrawSeed;
-    const requestedCount =
-      practiceDrawSize === 'ALL'
-        ? baseFilteredQuestions.length
-        : Math.max(1, parseInt(practiceDrawSize, 10) || baseFilteredQuestions.length);
+    const isAllMode = practiceDrawSize === 'ALL';
+    const requestedCount = isAllMode
+      ? baseFilteredQuestions.length
+      : Math.max(
+          1,
+          parseInt(practiceDrawSize, 10) ||
+            practiceCustomCount ||
+            baseFilteredQuestions.length
+        );
 
-    if (practiceDrawSize === 'ALL' && practiceDrawSeed === 0) {
-      return {
-        questions: baseFilteredQuestions,
-        totalBankSize: baseFilteredQuestions.length,
-        targetCount: baseFilteredQuestions.length,
-        topicAllocations: buildProportionalExamPool(
-          baseFilteredQuestions,
-          baseFilteredQuestions.length
-        ).topicAllocations,
-      };
-    }
-
-    return buildProportionalExamPool(baseFilteredQuestions, requestedCount);
-  }, [baseFilteredQuestions, practiceDrawSize, practiceDrawSeed]);
+    return resolvePracticeSessionPool(baseFilteredQuestions, {
+      questionCountMode: isAllMode ? 'ALL' : 'CUSTOM',
+      customQuestionCount: requestedCount,
+      timeLimitMinutes: practiceTimeMinutes,
+      shuffleQuestions: practiceShuffle,
+      focusMode: isFocusMode,
+    });
+  }, [
+    baseFilteredQuestions,
+    practiceDrawSize,
+    practiceCustomCount,
+    practiceTimeMinutes,
+    practiceShuffle,
+    isFocusMode,
+    practiceDrawSeed,
+  ]);
 
   const filteredPracticeQuestions = practiceDrawResult.questions;
 
   const activePracticeQuestion =
     filteredPracticeQuestions[practiceIndex] ?? filteredPracticeQuestions[0] ?? null;
+
+  // Đồng hồ đếm thời gian của phiên Luyện tập hiện tại
+  useEffect(() => {
+    if (activeTab !== 'practice' || !isPracticeSessionActive || isPracticeSetupOpen) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setPracticeElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeTab, isPracticeSessionActive, isPracticeSetupOpen]);
+
+  const practiceTimerStatus = useMemo(
+    () => formatPracticeTimerLabel(practiceTimeMinutes, practiceElapsedSeconds),
+    [practiceTimeMinutes, practiceElapsedSeconds]
+  );
+
+  // Thống kê nhanh trong phiên Luyện tập hiện tại
+  const practiceSessionStats = useMemo(() => {
+    let checkedCount = 0;
+    let correctCount = 0;
+    filteredPracticeQuestions.forEach((q) => {
+      if (practiceCheckedMap[q.id]) {
+        checkedCount += 1;
+        if (evaluateQuestion(q, practiceAnswers[q.id])) {
+          correctCount += 1;
+        }
+      }
+    });
+    const progressPercent =
+      filteredPracticeQuestions.length > 0
+        ? Math.round((checkedCount / filteredPracticeQuestions.length) * 100)
+        : 0;
+    return { checkedCount, correctCount, progressPercent };
+  }, [filteredPracticeQuestions, practiceCheckedMap, practiceAnswers]);
+
+  // Bắt đầu phiên luyện tập từ Hộp thoại Cấu hình
+  const handleStartPracticeSession = () => {
+    setPracticeDrawSeed((s) => s + 1);
+    setPracticeIndex(0);
+    setPracticeElapsedSeconds(0);
+    setIsPracticeSetupOpen(false);
+    setIsPracticeSessionActive(true);
+    setShowFilterDrawerInPractice(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Phím tắt bàn phím nhanh trong Chế độ Luyện tập (← Câu trước, → Câu tiếp, Enter Kiểm tra đáp án)
+  useEffect(() => {
+    if (activeTab !== 'practice' || isPracticeSetupOpen || !activePracticeQuestion) {
+      return;
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT')
+      ) {
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setPracticeIndex((i) => Math.max(0, i - 1));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setPracticeIndex((i) =>
+          Math.min(filteredPracticeQuestions.length - 1, i + 1)
+        );
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    activeTab,
+    isPracticeSetupOpen,
+    activePracticeQuestion,
+    filteredPracticeQuestions.length,
+  ]);
 
   // Danh sách câu hỏi trong Kho câu sai
   const wrongQuestionsList = useMemo(() => {
@@ -295,42 +403,138 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const totalCombinedStudySeconds =
     (currentUser.totalStudySeconds || 0) + (sessionStudySeconds % 20);
 
+  // Kiểm tra xem học sinh có đang ở trong không gian Tập trung Ôn thi / Thi thử hay không
+  const isInFocusWorkspace =
+    (activeTab === 'practice' && isPracticeSessionActive && isFocusMode) ||
+    (activeTab === 'exam' && isMockExamInProgress);
+
+  const handleSelectPracticeTab = () => {
+    setActiveTab('practice');
+    if (!isPracticeSessionActive) {
+      setIsPracticeSetupOpen(true);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Top Navigation Bar theo chuẩn 3-Zone Contract */}
-      <header className="flex items-center justify-between gap-6 px-6 py-4 bg-white border-b border-slate-200 sticky top-0 z-20">
-        {/* Zone 1: Brand Wordmark */}
-        <a
-          href="#student-home"
-          onClick={(e) => {
-            e.preventDefault();
-            setActiveTab('dashboard');
-          }}
-          className="text-lg font-bold tracking-tight text-teal-800 whitespace-nowrap shrink-0"
-        >
-          Certiport GenAI Prep
-        </a>
+      {/* Top Navigation Bar theo chuẩn 3-Zone Contract (Tự động ẩn nếu bật Chế độ Tập trung Tối đa) */}
+      {!isZenHeaderHidden && (
+        <header className="flex items-center justify-between gap-6 px-6 py-3.5 bg-white border-b border-slate-200 sticky top-0 z-20">
+          {/* Zone 1: Brand Wordmark */}
+          <a
+            href="#student-home"
+            onClick={(e) => {
+              e.preventDefault();
+              setActiveTab('dashboard');
+            }}
+            className="text-lg font-bold tracking-tight text-teal-800 whitespace-nowrap shrink-0"
+          >
+            Certiport GenAI Prep
+          </a>
 
-        {/* Zone 2: Top-level Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+          {/* Zone 2: Top-level Navigation Links */}
+          <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+            <button
+              type="button"
+              onClick={() => setActiveTab('dashboard')}
+              className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+                activeTab === 'dashboard'
+                  ? 'border-teal-700 text-teal-800 font-semibold'
+                  : 'border-transparent hover:text-slate-900'
+              }`}
+            >
+              Tổng quan
+            </button>
+            <button
+              type="button"
+              onClick={handleSelectPracticeTab}
+              className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+                activeTab === 'practice'
+                  ? 'border-teal-700 text-teal-800 font-semibold'
+                  : 'border-transparent hover:text-slate-900'
+              }`}
+            >
+              Chế độ Luyện tập
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('mistakes')}
+              className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 inline-flex items-center gap-1.5 cursor-pointer ${
+                activeTab === 'mistakes'
+                  ? 'border-rose-600 text-rose-700 font-semibold'
+                  : 'border-transparent hover:text-slate-900'
+              }`}
+            >
+              <span>Kho câu sai</span>
+              <span
+                className={`px-1.5 py-0.5 text-xs font-mono font-bold rounded-md tabular-nums ${
+                  wrongQuestionIds.length > 0
+                    ? 'bg-rose-100 text-rose-800'
+                    : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {wrongQuestionIds.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('exam')}
+              className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+                activeTab === 'exam'
+                  ? 'border-teal-700 text-teal-800 font-semibold'
+                  : 'border-transparent hover:text-slate-900'
+              }`}
+            >
+              Chế độ Thi thử (Mock Exam)
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('history')}
+              className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+                activeTab === 'history'
+                  ? 'border-teal-700 text-teal-800 font-semibold'
+                  : 'border-transparent hover:text-slate-900'
+              }`}
+            >
+              Lịch sử ({myAttempts.length})
+            </button>
+          </nav>
+
+          {/* Zone 3: 1 Primary Action */}
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Đăng xuất ({currentUser.username})</span>
+            </button>
+          </div>
+        </header>
+      )}
+
+      {/* Thanh điều hướng phụ cho màn hình nhỏ */}
+      {!isZenHeaderHidden && (
+        <div className="md:hidden flex items-center gap-1 px-4 py-2 bg-white border-b border-slate-200 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('dashboard')}
-            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
               activeTab === 'dashboard'
-                ? 'border-teal-700 text-teal-800 font-semibold'
-                : 'border-transparent hover:text-slate-900'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             Tổng quan
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('practice')}
-            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+            onClick={handleSelectPracticeTab}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
               activeTab === 'practice'
-                ? 'border-teal-700 text-teal-800 font-semibold'
-                : 'border-transparent hover:text-slate-900'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             Chế độ Luyện tập
@@ -338,349 +542,654 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('mistakes')}
-            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 inline-flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
               activeTab === 'mistakes'
-                ? 'border-rose-600 text-rose-700 font-semibold'
-                : 'border-transparent hover:text-slate-900'
+                ? 'bg-rose-600 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <span>Kho câu sai</span>
-            <span
-              className={`px-1.5 py-0.5 text-xs font-mono font-bold rounded-md tabular-nums ${
-                wrongQuestionIds.length > 0
-                  ? 'bg-rose-100 text-rose-800'
-                  : 'bg-slate-100 text-slate-600'
-              }`}
-            >
-              {wrongQuestionIds.length}
-            </span>
+            Kho câu sai ({wrongQuestionIds.length})
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('exam')}
-            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
               activeTab === 'exam'
-                ? 'border-teal-700 text-teal-800 font-semibold'
-                : 'border-transparent hover:text-slate-900'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            Chế độ Thi thử (Mock Exam)
+            Thi thử (Mock Exam)
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('history')}
-            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
               activeTab === 'history'
-                ? 'border-teal-700 text-teal-800 font-semibold'
-                : 'border-transparent hover:text-slate-900'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             Lịch sử ({myAttempts.length})
           </button>
-        </nav>
-
-        {/* Zone 3: 1 Primary Action */}
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={onLogout}
-            className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Đăng xuất ({currentUser.username})</span>
-          </button>
         </div>
-      </header>
-
-      {/* Thanh điều hướng phụ cho màn hình nhỏ */}
-      <div className="md:hidden flex items-center gap-1 px-4 py-2 bg-white border-b border-slate-200 overflow-x-auto">
-        <button
-          type="button"
-          onClick={() => setActiveTab('dashboard')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-            activeTab === 'dashboard'
-              ? 'bg-teal-700 text-white'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          Tổng quan
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('practice')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-            activeTab === 'practice'
-              ? 'bg-teal-700 text-white'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          Chế độ Luyện tập
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('mistakes')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-            activeTab === 'mistakes'
-              ? 'bg-rose-600 text-white'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          Kho câu sai ({wrongQuestionIds.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('exam')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-            activeTab === 'exam'
-              ? 'bg-teal-700 text-white'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          Thi thử (Mock Exam)
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('history')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-            activeTab === 'history'
-              ? 'bg-teal-700 text-white'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          Lịch sử ({myAttempts.length})
-        </button>
-      </div>
+      )}
 
       {/* Main Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Khung thông tin Học sinh & Đồng bộ thời gian thực Firestore */}
-        <section className="bg-white border border-slate-200 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="text-xs text-slate-500">
-              Thí sinh: <strong className="text-slate-900">{currentUser.fullName}</strong> · Mã học
-              sinh: <strong className="font-mono text-teal-800">{currentUser.username}</strong> ·{' '}
-              <span>{currentUser.className || 'Lớp luyện thi Certiport GenAI'}</span>
+      <main
+        className={`flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 ${
+          isInFocusWorkspace ? 'py-3 space-y-4' : 'py-6 space-y-6'
+        }`}
+      >
+        {/* Khung thông tin Học sinh — Tự động ẩn khi đang trong Phiên Ôn thi / Thi thử Tập trung */}
+        {!isInFocusWorkspace && (
+          <section className="bg-white border border-slate-200 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="text-xs text-slate-500">
+                Thí sinh: <strong className="text-slate-900">{currentUser.fullName}</strong> · Mã học
+                sinh: <strong className="font-mono text-teal-800">{currentUser.username}</strong> ·{' '}
+                <span>{currentUser.className || 'Lớp luyện thi Certiport GenAI'}</span>
+              </div>
+              <h1 className="text-lg sm:text-xl font-bold text-slate-900">
+                Hệ thống Luyện thi & Thi thử Chuẩn Phòng thi Certiport Generative AI
+              </h1>
             </div>
-            <h1 className="text-lg sm:text-xl font-bold text-slate-900">
-              Hệ thống Luyện thi & Thi thử Chuẩn Phòng thi Certiport Generative AI
-            </h1>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-6 text-xs text-slate-600 tabular-nums">
-            <div>
-              <span className="text-slate-400 block">Thời gian ôn tập</span>
-              <span className="font-mono font-semibold text-sm text-teal-800">
-                {formatStudyDuration(totalCombinedStudySeconds)}
-              </span>
+            <div className="flex flex-wrap items-center gap-6 text-xs text-slate-600 tabular-nums">
+              <div>
+                <span className="text-slate-400 block">Thời gian ôn tập</span>
+                <span className="font-mono font-semibold text-sm text-teal-800">
+                  {formatStudyDuration(totalCombinedStudySeconds)}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block">Đã đánh dấu (Bookmark)</span>
+                <span className="font-mono font-semibold text-sm text-amber-700">
+                  {bookmarkedIds.length} câu
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block">Kho câu sai cần ôn</span>
+                <span className="font-mono font-semibold text-sm text-rose-700">
+                  {wrongQuestionIds.length} câu
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block">Đã khắc phục</span>
+                <span className="font-mono font-semibold text-sm text-emerald-700">
+                  {masteredQuestionIds.length} câu
+                </span>
+              </div>
             </div>
-            <div>
-              <span className="text-slate-400 block">Đã đánh dấu (Bookmark)</span>
-              <span className="font-mono font-semibold text-sm text-amber-700">
-                {bookmarkedIds.length} câu
-              </span>
-            </div>
-            <div>
-              <span className="text-slate-400 block">Kho câu sai cần ôn</span>
-              <span className="font-mono font-semibold text-sm text-rose-700">
-                {wrongQuestionIds.length} câu
-              </span>
-            </div>
-            <div>
-              <span className="text-slate-400 block">Đã khắc phục</span>
-              <span className="font-mono font-semibold text-sm text-emerald-700">
-                {masteredQuestionIds.length} câu
-              </span>
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         {/* =====================================================================
-            TAB 1: CHẾ ĐỘ LUYỆN TẬP (LỌC CHUYÊN ĐỀ / DẠNG BÀI & BỐC ĐỀ THEO TỈ LỆ NGÂN HÀNG)
+            TAB 1: CHẾ ĐỘ LUYỆN TẬP (CÓ HỘP THOẠI CHỌN SỐ CÂU & THỜI GIAN TRƯỚC KHI VÀO LÀM + GIAO DIỆN TẬP TRUNG)
            ===================================================================== */}
         {activeTab === 'practice' && (
-          <div className="space-y-6">
-            {/* Thanh Bộ Lọc & Bốc đề ngẫu nhiên theo tỉ lệ Ngân hàng */}
+          <div data-testid="practice-focus-workspace" className="space-y-4">
+            {/* HỘP THOẠI CẤU HÌNH PHIÊN LUYỆN TẬP TRƯỚC KHI VÀO LÀM */}
+            {isPracticeSetupOpen && (
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="practice-setup-dialog-title"
+                data-testid="practice-setup-dialog"
+                className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+              >
+                <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full p-6 sm:p-7 shadow-2xl space-y-6 my-auto">
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
+                    <div className="space-y-1">
+                      <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-800">
+                        <Settings2 className="w-4 h-4 text-teal-700" />
+                        <span>Thiết lập Phiên Luyện tập Cá nhân</span>
+                      </div>
+                      <h2
+                        id="practice-setup-dialog-title"
+                        className="text-lg sm:text-xl font-bold text-slate-900"
+                      >
+                        Chọn Số câu hỏi & Thời gian trước khi vào Luyện tập
+                      </h2>
+                      <p className="text-xs sm:text-sm text-slate-600">
+                        Bạn có thể chọn <strong>làm tất cả các câu ({baseFilteredQuestions.length} câu)</strong> và <strong>không giới hạn thời gian</strong>, hoặc giới hạn số câu và đồng hồ đếm ngược để rèn tốc độ.
+                      </p>
+                    </div>
+                    {isPracticeSessionActive && (
+                      <button
+                        type="button"
+                        onClick={() => setIsPracticeSetupOpen(false)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700 cursor-pointer shrink-0"
+                      >
+                        Đóng
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Bước 1: Chọn Số lượng câu hỏi muốn làm */}
+                  <div className="space-y-2.5">
+                    <label className="block text-xs sm:text-sm font-bold text-slate-900">
+                      1. Chọn số lượng câu hỏi muốn làm (Ngân hàng hiện có {baseFilteredQuestions.length} câu):
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      <button
+                        type="button"
+                        data-testid="practice-count-option-all"
+                        onClick={() => {
+                          setPracticeDrawSize('ALL');
+                          setPracticeCustomCount(baseFilteredQuestions.length);
+                        }}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          practiceDrawSize === 'ALL'
+                            ? 'border-teal-600 bg-teal-50/80 ring-1 ring-teal-600 text-teal-950'
+                            : 'border-slate-200 bg-white hover:border-teal-500 text-slate-800'
+                        }`}
+                      >
+                        <div className="text-xs sm:text-sm font-bold">
+                          Làm tất cả các câu
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-mono tabular-nums mt-0.5">
+                          Toàn bộ {baseFilteredQuestions.length} câu hỏi
+                        </div>
+                      </button>
+
+                      {[10, 20, 35, 45].map((cnt) => {
+                        const isSelected = practiceDrawSize === String(cnt);
+                        return (
+                          <button
+                            key={cnt}
+                            type="button"
+                            data-testid={`practice-count-option-${cnt}`}
+                            onClick={() => {
+                              setPracticeDrawSize(String(cnt));
+                              setPracticeCustomCount(cnt);
+                            }}
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                              isSelected
+                                ? 'border-teal-600 bg-teal-50/80 ring-1 ring-teal-600 text-teal-950'
+                                : 'border-slate-200 bg-white hover:border-teal-500 text-slate-800'
+                            }`}
+                          >
+                            <div className="text-xs sm:text-sm font-bold font-mono tabular-nums">
+                              {cnt} câu hỏi
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {cnt === 45
+                                ? 'Chuẩn đề thi Certiport'
+                                : 'Bốc theo tỉ lệ ngân hàng'}
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                      {/* Ô nhập số câu tùy ý */}
+                      <div className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-center">
+                        <label
+                          htmlFor="practice-custom-count-input"
+                          className="text-[11px] font-semibold text-slate-600 mb-1"
+                        >
+                          Hoặc nhập số câu tùy ý:
+                        </label>
+                        <input
+                          id="practice-custom-count-input"
+                          data-testid="practice-custom-count-input"
+                          type="number"
+                          min={1}
+                          max={Math.max(1, baseFilteredQuestions.length)}
+                          value={
+                            practiceDrawSize === 'ALL'
+                              ? baseFilteredQuestions.length
+                              : parseInt(practiceDrawSize, 10) || practiceCustomCount
+                          }
+                          onChange={(e) => {
+                            const val = Math.max(
+                              1,
+                              Math.min(
+                                Math.max(1, baseFilteredQuestions.length),
+                                parseInt(e.target.value, 10) || 1
+                              )
+                            );
+                            setPracticeCustomCount(val);
+                            setPracticeDrawSize(String(val));
+                          }}
+                          className="w-full px-2.5 py-1 text-xs sm:text-sm font-mono font-bold rounded-lg border border-slate-300 bg-white text-slate-900"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bước 2: Chọn Thời gian làm bài (Hỗ trợ Không giới hạn thời gian) */}
+                  <div className="space-y-2.5">
+                    <label className="block text-xs sm:text-sm font-bold text-slate-900">
+                      2. Chọn thời gian làm bài:
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      <button
+                        type="button"
+                        data-testid="practice-time-option-0"
+                        onClick={() => setPracticeTimeMinutes(0)}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          practiceTimeMinutes === 0
+                            ? 'border-teal-600 bg-teal-50/80 ring-1 ring-teal-600 text-teal-950'
+                            : 'border-slate-200 bg-white hover:border-teal-500 text-slate-800'
+                        }`}
+                      >
+                        <div className="text-xs sm:text-sm font-bold">
+                          ∞ Không giới hạn
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          Tự do ôn tập thoải mái
+                        </div>
+                      </button>
+
+                      {[15, 30, 50, 60].map((mins) => {
+                        const isSelected = practiceTimeMinutes === mins;
+                        return (
+                          <button
+                            key={mins}
+                            type="button"
+                            data-testid={`practice-time-option-${mins}`}
+                            onClick={() => setPracticeTimeMinutes(mins)}
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                              isSelected
+                                ? 'border-teal-600 bg-teal-50/80 ring-1 ring-teal-600 text-teal-950'
+                                : 'border-slate-200 bg-white hover:border-teal-500 text-slate-800'
+                            }`}
+                          >
+                            <div className="text-xs sm:text-sm font-bold font-mono tabular-nums">
+                              {mins} phút
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {mins === 50
+                                ? 'Chuẩn 50p Certiport'
+                                : 'Đếm ngược thời gian'}
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                      <div className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 flex flex-col justify-center">
+                        <label
+                          htmlFor="practice-custom-time-input"
+                          className="text-[11px] font-semibold text-slate-600 mb-1"
+                        >
+                          Số phút tùy chỉnh (0 = ∞):
+                        </label>
+                        <input
+                          id="practice-custom-time-input"
+                          data-testid="practice-custom-time-input"
+                          type="number"
+                          min={0}
+                          max={300}
+                          value={practiceTimeMinutes}
+                          onChange={(e) =>
+                            setPracticeTimeMinutes(
+                              Math.max(0, parseInt(e.target.value, 10) || 0)
+                            )
+                          }
+                          className="w-full px-2.5 py-1 text-xs sm:text-sm font-mono font-bold rounded-lg border border-slate-300 bg-white text-slate-900"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bước 3: Lọc Chuyên đề, Dạng bài & Chế độ Tập trung */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                    <div>
+                      <label
+                        htmlFor="setup-practice-topic"
+                        className="block text-xs font-semibold text-slate-600 mb-1"
+                      >
+                        Chuyên đề kiến thức:
+                      </label>
+                      <select
+                        id="setup-practice-topic"
+                        value={practiceTopic}
+                        onChange={(e) => setPracticeTopic(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm font-medium text-slate-900"
+                      >
+                        <option value="ALL">Tất cả 4 chuyên đề kiến thức</option>
+                        {CERTIPORT_TOPICS.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="setup-practice-type"
+                        className="block text-xs font-semibold text-slate-600 mb-1"
+                      >
+                        Dạng câu hỏi tương tác:
+                      </label>
+                      <select
+                        id="setup-practice-type"
+                        value={practiceType}
+                        onChange={(e) =>
+                          setPracticeType(e.target.value as QuestionTypeFilter)
+                        }
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm font-medium text-slate-900"
+                      >
+                        {QUESTION_FILTER_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-4 pt-1 text-xs font-semibold text-slate-700">
+                    <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={practiceShuffle}
+                        onChange={(e) => setPracticeShuffle(e.target.checked)}
+                        className="rounded border-slate-300 text-teal-700 focus:ring-teal-600"
+                      />
+                      <span>Xáo trộn ngẫu nhiên câu hỏi</span>
+                    </label>
+
+                    <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={isFocusMode}
+                        onChange={(e) => setIsFocusMode(e.target.checked)}
+                        className="rounded border-slate-300 text-teal-700 focus:ring-teal-600"
+                      />
+                      <span>Tối ưu hiển thị Tập trung (Ẩn khung phụ, phóng rõ chữ đề)</span>
+                    </label>
+
+                    <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={onlyBookmarked}
+                        onChange={(e) => setOnlyBookmarked(e.target.checked)}
+                        className="rounded border-slate-300 text-teal-700 focus:ring-teal-600"
+                      />
+                      <span>Chỉ làm câu đã đánh dấu ({bookmarkedIds.length})</span>
+                    </label>
+                  </div>
+
+                  {/* Nút Bắt đầu Vào Làm Bài */}
+                  <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs text-slate-600 tabular-nums">
+                      Sẵn sàng:{' '}
+                      <strong className="text-teal-800 font-mono">
+                        {filteredPracticeQuestions.length} câu hỏi
+                      </strong>{' '}
+                      · Thời gian:{' '}
+                      <strong className="text-teal-800">
+                        {practiceTimeMinutes === 0
+                          ? '∞ Không giới hạn thời gian'
+                          : `${practiceTimeMinutes} phút`}
+                      </strong>
+                    </div>
+
+                    <button
+                      type="button"
+                      data-testid="start-practice-session-btn"
+                      disabled={filteredPracticeQuestions.length === 0}
+                      onClick={handleStartPracticeSession}
+                      className="px-6 py-3 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:bg-slate-300 text-white text-sm font-bold inline-flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+                    >
+                      <PlayCircle className="w-5 h-5" />
+                      <span>
+                        Bắt đầu Vào Làm Bài ({filteredPracticeQuestions.length} câu)
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* THANH ĐIỀU KHIỂN ÔN THI TẬP TRUNG (STICKY FOCUS COMMAND BAR) */}
             <section
-              aria-label="Thanh bộ lọc và bốc đề Chế độ Luyện tập"
-              className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-2xs"
+              aria-label="Thanh điều khiển Chế độ Luyện tập Tập trung"
+              data-testid="practice-focus-command-bar"
+              className={`sticky ${
+                isZenHeaderHidden ? 'top-2' : 'top-[57px]'
+              } z-20 bg-white/95 backdrop-blur-xs border border-slate-200 rounded-xl p-3.5 sm:px-5 shadow-xs space-y-2.5`}
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                  <Filter className="w-4 h-4 text-teal-700" />
-                  <span>
-                    Bộ lọc Luyện tập & Bốc Đề Ngẫu nhiên theo Tỉ lệ Ngân hàng ({filteredPracticeQuestions.length} / {baseFilteredQuestions.length} câu)
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="px-3 py-1.5 rounded-lg bg-teal-800 text-white text-xs font-bold tracking-wide tabular-nums">
+                    LUYỆN TẬP · CÂU {Math.min(practiceIndex + 1, filteredPracticeQuestions.length)}/{filteredPracticeQuestions.length}
                   </span>
+
+                  <div className="text-xs sm:text-sm font-medium text-slate-700 tabular-nums">
+                    Đã kiểm tra:{' '}
+                    <strong className="font-mono text-teal-800">
+                      {practiceSessionStats.checkedCount}/{filteredPracticeQuestions.length}
+                    </strong>{' '}
+                    · Đúng:{' '}
+                    <strong className="font-mono text-emerald-700">
+                      {practiceSessionStats.correctCount}
+                    </strong>
+                  </div>
                 </div>
 
+                {/* Các nút Công cụ Tập trung & Quan sát (Đồng hồ, Cỡ chữ A-/A/A+, Mở rộng khung đề, Đổi cấu hình) */}
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    data-testid="redraw-proportional-practice-btn"
-                    onClick={() => {
-                      setPracticeDrawSeed((s) => s + 1);
-                      setPracticeIndex(0);
-                    }}
-                    className="px-3.5 py-2 rounded-lg border border-teal-600 bg-teal-50/70 hover:bg-teal-100 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    <Shuffle className="w-3.5 h-3.5 text-teal-700" />
-                    <span>Bốc đề ngẫu nhiên mới theo tỉ lệ</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOnlyBookmarked((prev) => !prev);
-                      setPracticeIndex(0);
-                    }}
-                    className={`px-3.5 py-2 rounded-lg border text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer ${
-                      onlyBookmarked
-                        ? 'border-amber-500 bg-amber-50 text-amber-900 ring-1 ring-amber-500'
-                        : 'border-slate-300 bg-white text-slate-700 hover:border-teal-600'
+                  {/* Đồng hồ Thời gian (Không giới hạn hoặc Đếm ngược) */}
+                  <div
+                    data-testid="practice-session-timer"
+                    className={`px-3 py-1.5 rounded-lg font-mono text-xs sm:text-sm font-bold tabular-nums inline-flex items-center gap-1.5 ${
+                      practiceTimerStatus.isExpired
+                        ? 'bg-rose-600 text-white'
+                        : practiceTimerStatus.isWarning
+                          ? 'bg-amber-500 text-white animate-pulse'
+                          : 'bg-slate-900 text-white'
                     }`}
                   >
-                    <Star
-                      className={`w-3.5 h-3.5 ${
-                        onlyBookmarked ? 'fill-amber-400 text-amber-500' : 'text-slate-400'
+                    <Clock className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      {practiceTimerStatus.isUnlimited
+                        ? `∞ Không giới hạn · ${practiceTimerStatus.displayClock}`
+                        : practiceTimerStatus.isExpired
+                          ? 'Hết giờ! (00:00)'
+                          : `Còn lại: ${practiceTimerStatus.displayClock}`}
+                    </span>
+                  </div>
+
+                  {/* Bộ chỉnh cỡ chữ A- / A / A+ giúp dễ quan sát */}
+                  <div
+                    className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs"
+                    role="group"
+                    aria-label="Chỉnh cỡ chữ câu hỏi"
+                  >
+                    <button
+                      type="button"
+                      data-testid="font-scale-btn-normal"
+                      onClick={() => setFontScale('normal')}
+                      className={`px-2 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                        fontScale === 'normal'
+                          ? 'bg-white text-teal-800 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
                       }`}
-                    />
-                    <span>Câu đã đánh dấu (Bookmark: {bookmarkedIds.length})</span>
+                    >
+                      A-
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="font-scale-btn-large"
+                      onClick={() => setFontScale('large')}
+                      className={`px-2 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                        fontScale === 'large'
+                          ? 'bg-white text-teal-800 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      A
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="font-scale-btn-xlarge"
+                      onClick={() => setFontScale('xlarge')}
+                      className={`px-2 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                        fontScale === 'xlarge'
+                          ? 'bg-white text-teal-800 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      A+
+                    </button>
+                  </div>
+
+                  {/* Nút Mở rộng khung đề (Ẩn/Hiện cột danh sách câu hỏi) */}
+                  <button
+                    type="button"
+                    data-testid="toggle-navigator-sidebar-btn"
+                    onClick={() => setIsPracticeNavCollapsed((prev) => !prev)}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    {isPracticeNavCollapsed ? (
+                      <>
+                        <Minimize2 className="w-3.5 h-3.5" />
+                        <span>Hiện bảng số câu</span>
+                      </>
+                    ) : (
+                      <>
+                        <Maximize2 className="w-3.5 h-3.5" />
+                        <span>Mở rộng khung đề</span>
+                      </>
+                    )}
                   </button>
 
-                  {(practiceTopic !== 'ALL' ||
-                    practiceType !== 'ALL' ||
-                    practiceDrawSize !== 'ALL' ||
-                    onlyBookmarked) && (
+                  {/* Nút Ẩn/Hiện thanh menu trên cùng để Tập trung 100% */}
+                  <button
+                    type="button"
+                    data-testid="toggle-zen-header-btn"
+                    onClick={() => setIsZenHeaderHidden((prev) => !prev)}
+                    className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                      isZenHeaderHidden
+                        ? 'border-teal-600 bg-teal-50 text-teal-900'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {isZenHeaderHidden ? 'Hiện menu trên' : 'Ẩn menu trên'}
+                  </button>
+
+                  {/* Nút Mở lại Hộp thoại Chọn Số câu & Thời gian */}
+                  <button
+                    type="button"
+                    data-testid="open-practice-setup-btn"
+                    onClick={() => setIsPracticeSetupOpen(true)}
+                    className="px-3 py-1.5 rounded-lg border border-teal-600 bg-teal-50/80 hover:bg-teal-100 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Settings2 className="w-3.5 h-3.5 text-teal-700" />
+                    <span>Chọn Số câu & Thời gian</span>
+                  </button>
+
+                  {/* Nút bật/tắt nhanh bộ lọc phụ */}
+                  <button
+                    type="button"
+                    onClick={() => setShowFilterDrawerInPractice((prev) => !prev)}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Filter className="w-3.5 h-3.5" />
+                    <span>Bộ lọc</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Thanh tiến độ trực quan */}
+              <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-teal-600 transition-all duration-200 rounded-full"
+                  style={{ width: `${practiceSessionStats.progressPercent}%` }}
+                />
+              </div>
+
+              {/* Ngăn kéo Bộ lọc nhanh (chỉ mở khi học sinh bấm nút "Bộ lọc") */}
+              {showFilterDrawerInPractice && (
+                <div className="pt-3 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label
+                      htmlFor="practice-topic-select"
+                      className="block text-[11px] font-semibold text-slate-600 mb-1"
+                    >
+                      Chuyên đề kiến thức:
+                    </label>
+                    <select
+                      id="practice-topic-select"
+                      value={practiceTopic}
+                      onChange={(e) => {
+                        setPracticeTopic(e.target.value);
+                        setPracticeIndex(0);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-900"
+                    >
+                      <option value="ALL">Tất cả 4 chuyên đề kiến thức</option>
+                      {CERTIPORT_TOPICS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="practice-type-select"
+                      className="block text-[11px] font-semibold text-slate-600 mb-1"
+                    >
+                      Dạng bài tập:
+                    </label>
+                    <select
+                      id="practice-type-select"
+                      value={practiceType}
+                      onChange={(e) => {
+                        setPracticeType(e.target.value as QuestionTypeFilter);
+                        setPracticeIndex(0);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-900"
+                    >
+                      {QUESTION_FILTER_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-end gap-2">
+                    <button
+                      type="button"
+                      data-testid="redraw-proportional-practice-btn"
+                      onClick={() => {
+                        setPracticeDrawSeed((s) => s + 1);
+                        setPracticeIndex(0);
+                      }}
+                      className="px-3 py-2 rounded-lg border border-teal-600 bg-teal-50 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Shuffle className="w-3.5 h-3.5" />
+                      <span>Bốc đề mới</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => {
-                        setPracticeTopic('ALL');
-                        setPracticeType('ALL');
-                        setPracticeDrawSize('ALL');
-                        setPracticeDrawSeed(0);
-                        setOnlyBookmarked(false);
+                        setOnlyBookmarked((prev) => !prev);
                         setPracticeIndex(0);
                       }}
-                      className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                      className={`px-3 py-2 rounded-lg border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                        onlyBookmarked
+                          ? 'border-amber-500 bg-amber-50 text-amber-900'
+                          : 'border-slate-300 bg-white text-slate-700'
+                      }`}
                     >
-                      <RotateCcw className="w-3.5 h-3.5" /> Đặt lại bộ lọc
+                      <Star className="w-3.5 h-3.5" />
+                      <span>Bookmark ({bookmarkedIds.length})</span>
                     </button>
-                  )}
+                  </div>
                 </div>
-              </div>
-
-              {/* 3 chiều cấu hình: Chuyên đề | Dạng bài tập | Số lượng câu bốc ngẫu nhiên theo tỉ lệ */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="practice-topic-select"
-                    className="block text-xs font-semibold text-slate-600"
-                  >
-                    1. Chuyên đề kiến thức (4 chuyên đề Certiport)
-                  </label>
-                  <select
-                    id="practice-topic-select"
-                    value={practiceTopic}
-                    onChange={(e) => {
-                      setPracticeTopic(e.target.value);
-                      setPracticeIndex(0);
-                    }}
-                    className="w-full px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
-                  >
-                    <option value="ALL">Tất cả 4 chuyên đề kiến thức</option>
-                    {CERTIPORT_TOPICS.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="practice-type-select"
-                    className="block text-xs font-semibold text-slate-600"
-                  >
-                    2. Dạng bài tập tương tác (4 dạng câu hỏi)
-                  </label>
-                  <select
-                    id="practice-type-select"
-                    value={practiceType}
-                    onChange={(e) => {
-                      setPracticeType(e.target.value as QuestionTypeFilter);
-                      setPracticeIndex(0);
-                    }}
-                    className="w-full px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
-                  >
-                    {QUESTION_FILTER_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="practice-examset-select"
-                    className="block text-xs font-semibold text-slate-600"
-                  >
-                    3. Số câu bốc ngẫu nhiên theo tỉ lệ Ngân hàng
-                  </label>
-                  <select
-                    id="practice-examset-select"
-                    value={practiceDrawSize}
-                    onChange={(e) => {
-                      setPracticeDrawSize(e.target.value);
-                      setPracticeDrawSeed((s) => s + 1);
-                      setPracticeIndex(0);
-                    }}
-                    className="w-full px-3 py-2.5 rounded-lg border border-teal-600 bg-teal-50/40 text-xs sm:text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
-                  >
-                    <option value="ALL">
-                      Toàn bộ câu hỏi trong ngân hàng ({baseFilteredQuestions.length} câu)
-                    </option>
-                    <option value="5">
-                      Bốc ngẫu nhiên 5 câu theo tỉ lệ ngân hàng
-                    </option>
-                    <option value="10">
-                      Bốc ngẫu nhiên 10 câu theo tỉ lệ ngân hàng
-                    </option>
-                    <option value="20">
-                      Bốc ngẫu nhiên 20 câu theo tỉ lệ ngân hàng
-                    </option>
-                    <option value="35">
-                      Bốc ngẫu nhiên 35 câu theo tỉ lệ ngân hàng
-                    </option>
-                    <option value="45">
-                      Bốc ngẫu nhiên 45 câu chuẩn Certiport theo tỉ lệ ngân hàng
-                    </option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Thanh hiển thị tỉ lệ phân bổ câu hỏi theo chuyên đề vừa bốc */}
-              <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-semibold text-slate-600">
-                  Tỉ lệ bốc từ ngân hàng:
-                </span>
-                {practiceDrawResult.topicAllocations
-                  .filter((a) => a.bankCount > 0)
-                  .map((alloc) => (
-                    <span
-                      key={alloc.topic}
-                      className="px-2.5 py-1 rounded-md bg-slate-50 border border-slate-200 text-slate-700 tabular-nums"
-                    >
-                      {alloc.topic}:{' '}
-                      <strong className="text-teal-800 font-mono">
-                        {alloc.allocatedCount}/{alloc.bankCount} câu
-                      </strong>{' '}
-                      ({alloc.bankPercentage}%)
-                    </span>
-                  ))}
-              </div>
+              )}
 
               {syncBannerText && (
-                <div className="px-4 py-2.5 rounded-lg bg-sky-50 border border-sky-200 text-xs font-medium text-teal-900 flex items-center justify-between gap-2">
+                <div className="px-3.5 py-2 rounded-lg bg-sky-50 border border-sky-200 text-xs font-medium text-teal-900 flex items-center justify-between gap-2">
                   <span>{syncBannerText}</span>
                   <button
                     type="button"
@@ -715,7 +1224,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                <div className="lg:col-span-8 space-y-4">
+                <div
+                  className={`${
+                    isPracticeNavCollapsed
+                      ? 'lg:col-span-12 max-w-5xl w-full mx-auto'
+                      : 'lg:col-span-8'
+                  } space-y-4`}
+                >
                   {activePracticeQuestion && (
                     <>
                       <QuestionRenderer
@@ -738,6 +1253,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         showFeedback={Boolean(practiceCheckedMap[activePracticeQuestion.id])}
                         isBookmarked={bookmarkedIds.includes(activePracticeQuestion.id)}
                         onToggleBookmark={(qId) => onToggleBookmark(qId)}
+                        fontScale={fontScale}
                       />
 
                       <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
@@ -746,9 +1262,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             type="button"
                             disabled={practiceIndex === 0}
                             onClick={() => setPracticeIndex((i) => Math.max(0, i - 1))}
-                            className="px-3.5 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                            className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs sm:text-sm font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
                           >
-                            <ChevronLeft className="w-4 h-4" /> Câu trước
+                            <ChevronLeft className="w-4 h-4" /> Câu trước (←)
                           </button>
 
                           <button
@@ -759,9 +1275,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 Math.min(filteredPracticeQuestions.length - 1, i + 1)
                               )
                             }
-                            className="px-3.5 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                            className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs sm:text-sm font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
                           >
-                            Câu tiếp theo <ChevronRight className="w-4 h-4" />
+                            Câu tiếp theo (→) <ChevronRight className="w-4 h-4" />
                           </button>
                         </div>
 
@@ -799,58 +1315,62 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   )}
                 </div>
 
-                <aside className="lg:col-span-4 bg-white border border-slate-200 rounded-xl p-5 space-y-5">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-900">
-                      Danh sách Câu hỏi Đang lọc ({filteredPracticeQuestions.length} câu)
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Tiến độ & Bookmark tự động đồng bộ trực tiếp lên Cloud Firestore.
-                    </p>
-                  </div>
+                {!isPracticeNavCollapsed && (
+                  <aside className="lg:col-span-4 bg-white border border-slate-200 rounded-xl p-5 space-y-4 sticky top-28">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">
+                          Bảng Câu hỏi ({filteredPracticeQuestions.length} câu)
+                        </h3>
+                        <p className="text-xs text-slate-500">
+                          Dùng phím ← / → hoặc bấm số câu để chuyển nhanh.
+                        </p>
+                      </div>
+                    </div>
 
-                  <div className="grid grid-cols-4 gap-2">
-                    {filteredPracticeQuestions.map((q, idx) => {
-                      const isCurrent = idx === practiceIndex;
-                      const isBookmarked = bookmarkedIds.includes(q.id);
-                      const checkedHere = Boolean(practiceCheckedMap[q.id]);
-                      const localCorrect =
-                        checkedHere && evaluateQuestion(q, practiceAnswers[q.id]);
-                      const savedStat = practiceProgress[q.id];
+                    <div className="grid grid-cols-5 gap-2 max-h-[380px] overflow-y-auto pr-1">
+                      {filteredPracticeQuestions.map((q, idx) => {
+                        const isCurrent = idx === practiceIndex;
+                        const isBookmarked = bookmarkedIds.includes(q.id);
+                        const checkedHere = Boolean(practiceCheckedMap[q.id]);
+                        const localCorrect =
+                          checkedHere && evaluateQuestion(q, practiceAnswers[q.id]);
+                        const savedStat = practiceProgress[q.id];
 
-                      let styleClass =
-                        'border-slate-200 bg-slate-50 text-slate-700 hover:border-teal-600';
-                      if (checkedHere) {
-                        styleClass = localCorrect
-                          ? 'border-emerald-600 bg-emerald-50 text-emerald-900 font-bold'
-                          : 'border-rose-500 bg-rose-50 text-rose-900 font-bold';
-                      } else if (savedStat) {
-                        styleClass = savedStat.isCorrect
-                          ? 'border-emerald-300 bg-emerald-50/50 text-emerald-900'
-                          : 'border-rose-300 bg-rose-50/50 text-rose-900';
-                      }
+                        let styleClass =
+                          'border-slate-200 bg-slate-50 text-slate-700 hover:border-teal-600';
+                        if (checkedHere) {
+                          styleClass = localCorrect
+                            ? 'border-emerald-600 bg-emerald-50 text-emerald-900 font-bold'
+                            : 'border-rose-500 bg-rose-50 text-rose-900 font-bold';
+                        } else if (savedStat) {
+                          styleClass = savedStat.isCorrect
+                            ? 'border-emerald-300 bg-emerald-50/50 text-emerald-900'
+                            : 'border-rose-300 bg-rose-50/50 text-rose-900';
+                        }
 
-                      if (isCurrent) {
-                        styleClass += ' ring-2 ring-teal-700 ring-offset-1';
-                      }
+                        if (isCurrent) {
+                          styleClass += ' ring-2 ring-teal-700 ring-offset-1';
+                        }
 
-                      return (
-                        <button
-                          key={q.id}
-                          type="button"
-                          onClick={() => setPracticeIndex(idx)}
-                          className={`py-2 px-1.5 rounded-lg border text-xs font-mono tabular-nums transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer ${styleClass}`}
-                        >
-                          <span>Câu {idx + 1}</span>
-                          <span className="text-[10px] font-sans flex items-center gap-0.5">
-                            {isBookmarked && <span className="text-amber-600">★</span>}
-                            <span>{q.id.toUpperCase()}</span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </aside>
+                        return (
+                          <button
+                            key={q.id}
+                            type="button"
+                            onClick={() => setPracticeIndex(idx)}
+                            className={`py-2 px-1 rounded-lg border text-xs font-mono tabular-nums transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer ${styleClass}`}
+                          >
+                            <span>{idx + 1}</span>
+                            <span className="text-[9px] font-sans flex items-center gap-0.5 leading-none">
+                              {isBookmarked && <span className="text-amber-600">★</span>}
+                              <span>{checkedHere ? (localCorrect ? '✓ Đúng' : '✗ Sai') : 'Câu ' + (idx + 1)}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </aside>
+                )}
               </div>
             )}
           </div>
@@ -1137,7 +1657,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveTab('practice')}
+                    onClick={() => {
+                      setIsPracticeSetupOpen(true);
+                      setActiveTab('practice');
+                    }}
                     className="px-4 py-2.5 rounded-lg bg-white border border-slate-300 hover:border-teal-600 text-slate-800 text-sm font-semibold transition-colors inline-flex items-center gap-2 cursor-pointer"
                   >
                     <Target className="w-4 h-4" />
@@ -1195,6 +1718,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             setPracticeDrawSeed((s) => s + 1);
                             setOnlyBookmarked(false);
                             setPracticeIndex(0);
+                            setIsPracticeSetupOpen(true);
                             setActiveTab('practice');
                           }}
                           className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-sky-50 text-teal-800 hover:bg-teal-700 hover:text-white disabled:opacity-40 transition-colors cursor-pointer shrink-0"
@@ -1221,6 +1745,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             onToggleBookmark={onToggleBookmark}
             onSaveAttempt={onSaveAttempt}
             onOpenMistakesTab={() => setActiveTab('mistakes')}
+            fontScale={fontScale}
+            onChangeFontScale={setFontScale}
+            isFocusMode={isZenHeaderHidden}
+            onToggleFocusMode={() => setIsZenHeaderHidden((prev) => !prev)}
+            onExamPhaseChange={setIsMockExamInProgress}
           />
         )}
 

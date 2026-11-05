@@ -18,6 +18,8 @@ import {
 import { QUESTION_TYPE_LABELS, Question, UserAnswer } from '../types/exam';
 import { evaluateQuestion, getCorrectAnswerBreakdown } from '../utils/scoring';
 
+export type QuestionFontScale = 'normal' | 'large' | 'xlarge';
+
 interface QuestionRendererProps {
   question: Question;
   questionNumber?: number;
@@ -28,6 +30,7 @@ interface QuestionRendererProps {
   readOnly?: boolean;
   isBookmarked?: boolean;
   onToggleBookmark?: (questionId: string) => void;
+  fontScale?: QuestionFontScale;
 }
 
 export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
@@ -40,6 +43,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
   readOnly = false,
   isBookmarked = false,
   onToggleBookmark,
+  fontScale = 'normal',
 }) => {
   const [selectedLeftPairId, setSelectedLeftPairId] = useState<string | null>(null);
   const [draggedMatchText, setDraggedMatchText] = useState<string | null>(null);
@@ -215,8 +219,26 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
     return /\(\s*Chọn\s+\d+\s*\)/i.test(question.prompt);
   }, [question.prompt, question.type]);
 
+  const promptTextSizeClass =
+    fontScale === 'xlarge'
+      ? 'text-xl sm:text-2xl leading-relaxed'
+      : fontScale === 'large'
+        ? 'text-lg sm:text-xl leading-relaxed'
+        : 'text-base sm:text-lg leading-relaxed';
+
+  const optionTextSizeClass =
+    fontScale === 'xlarge'
+      ? 'text-base sm:text-lg leading-relaxed'
+      : fontScale === 'large'
+        ? 'text-base sm:text-[17px] leading-relaxed'
+        : 'text-sm sm:text-base leading-relaxed';
+
   return (
-    <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+    <div
+      data-testid="question-renderer-card"
+      data-font-scale={fontScale}
+      className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden"
+    >
       {/* Thanh thông tin câu hỏi theo chuẩn phòng thi Certiport */}
       <div className="px-6 py-4 bg-sky-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
@@ -265,10 +287,10 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
       </div>
 
       {/* Nội dung câu hỏi chính */}
-      <div className="p-6 space-y-6">
+      <div className="p-6 sm:p-7 space-y-6">
         <div className="space-y-2.5">
           <div className="flex flex-wrap items-baseline gap-2">
-            <p className="text-base sm:text-lg font-semibold text-slate-900 leading-relaxed">
+            <p className={`${promptTextSizeClass} font-semibold text-slate-900`}>
               {question.prompt}
               {question.type === 'mcq_multiple' && !promptHasChooseNote && (
                 <span className="ml-2 inline-block text-teal-800 font-bold">
@@ -413,7 +435,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                       )}
                     </span>
 
-                    <div className="flex-1 text-sm sm:text-base text-slate-800 leading-relaxed">
+                    <div className={`flex-1 ${optionTextSizeClass} text-slate-800`}>
                       <span className="font-mono font-bold text-slate-700 mr-2">
                         {letter}.
                       </span>
@@ -507,7 +529,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                       {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                     </span>
 
-                    <div className="flex-1 text-sm sm:text-base text-slate-800 leading-relaxed">
+                    <div className={`flex-1 ${optionTextSizeClass} text-slate-800`}>
                       <span className="font-mono font-bold text-slate-700 mr-2">
                         {letter}.
                       </span>
@@ -567,7 +589,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                       <span className="w-6 h-6 rounded-md bg-slate-100 border border-slate-200 text-xs font-mono font-semibold text-slate-600 flex items-center justify-center shrink-0 tabular-nums mt-0.5">
                         {idx + 1}
                       </span>
-                      <span className="text-sm sm:text-base text-slate-800 font-medium leading-relaxed">
+                      <span className={`${optionTextSizeClass} text-slate-800 font-medium`}>
                         {sub.statement}
                       </span>
                     </div>

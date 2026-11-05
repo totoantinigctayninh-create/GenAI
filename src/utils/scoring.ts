@@ -775,3 +775,100 @@ export function evaluateExamSet(
     typeBreakdown,
   };
 }
+
+export interface PracticeSessionConfig {
+  questionCountMode: 'ALL' | 'CUSTOM';
+  customQuestionCount: number;
+  /** 0 có nghĩa là Không giới hạn thời gian (Unlimited) */
+  timeLimitMinutes: number;
+  shuffleQuestions: boolean;
+  focusMode: boolean;
+}
+
+export interface PracticeTimerStatus {
+  displayClock: string;
+  isUnlimited: boolean;
+  isWarning: boolean;
+  isExpired: boolean;
+  remainingSeconds: number;
+}
+
+/**
+ * Rút trích bộ câu hỏi cho phiên Luyện tập theo cấu hình của Học sinh:
+ * - Hỗ trợ chọn làm TẤT CẢ các câu ('ALL') hoặc chọn số lượng câu tùy ý ('CUSTOM' theo tỉ lệ ngân hàng)
+ * - Hỗ trợ xáo trộn ngẫu nhiên hoặc giữ nguyên thứ tự
+ */
+export function resolvePracticeSessionPool(
+  baseQuestions: Question[],
+  config: PracticeSessionConfig,
+  randomFn: () => number = Math.random
+): ProportionalExamDrawResult {
+  const totalAvailable = baseQuestions.length;
+  if (totalAvailable === 0) {
+    return {
+      questions: [],
+      totalBankSize: 0,
+      targetCount: 0,
+      topicAllocations: buildProportionalExamPool([], 0, randomFn).topicAllocations,
+    };
+  }
+
+  const isAllQuestions =
+    config.questionCountMode === 'ALL' ||
+    config.customQuestionCount <= 0 ||
+    config.customQuestionCount >= totalAvailable;
+
+  if (isAllQuestions) {
+    const proportionalAll = buildProportionalExamPool(
+      baseQuestions,
+      totalAvailable,
+      randomFn
+    );
+    return {
+      questions: config.shuffleQuestions ? proportionalAll.questions : [...baseQuestions],
+      totalBankSize: totalAvailable,
+      targetCount: totalAvailable,
+      topicAllocations: proportionalAll.topicAllocations,
+    };
+  }
+
+  const requested = Math.max(
+    1,
+    Math.min(totalAvailable, Math.floor(config.customQuestionCount))
+  );
+  return buildProportionalExamPool(baseQuestions, requested, randomFn);
+}
+
+/**
+ * Định dạng đồng hồ cho phiên Luyện tập / Thi thử:
+ * - Nếu timeLimitMinutes <= 0: Không giới hạn thời gian (đếm tăng dần thời gian đã làm)
+ * - Nếu timeLimitMinutes > 0: Đếm ngược thời gian còn lại và cảnh báo khi còn dưới 5 phút (hoặc 20% tổng thời gian)
+ */
+export function formatPracticeTimerLabel(
+  timeLimitMinutes: number,
+  elapsedSeconds: number
+): PracticeTimerStatus {
+  const safeElapsed = Math.max(0, Math.floor(elapsedSeconds));
+  if (timeLimitMinutes <= 0) {
+    return {
+      displayClock: formatCountdownClock(safeElapsed),
+      isUnlimited: true,
+      isWarning: false,
+      isExpired: false,
+      remainingSeconds: 0,
+    };
+  }
+
+  const totalSeconds = Math.max(60, Math.floor(timeLimitMinutes * 60));
+  const remainingSeconds = Math.max(0, totalSeconds - safeElapsed);
+  const warningThreshold = Math.min(300, Math.max(60, Math.floor(totalSeconds * 0.2)));
+
+  return {
+    displayClock: formatCountdownClock(remainingSeconds),
+    isUnlimited: false,
+    isWarning: remainingSeconds > 0 && remainingSeconds <= warningThreshold,
+    isExpired: remainingSeconds === 0,
+    remainingSeconds,
+  };
+}
+
