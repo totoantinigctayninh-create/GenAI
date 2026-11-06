@@ -37,6 +37,8 @@ import {
 } from '../utils/questionBankUtils';
 import { evaluateQuestion } from '../utils/scoring';
 import { buildClassReportWorkbookBytes } from '../utils/teacherAnalytics';
+import { ThemeToggleButton } from '../context/ThemeContext';
+import { IgcToanTinDefaultEmblem } from './LoginScreen';
 import { QuestionEditorModal } from './QuestionEditorModal';
 import { QuestionRenderer } from './QuestionRenderer';
 import { formatStudyDuration } from './StudentPortal';
@@ -66,6 +68,8 @@ interface TeacherPortalProps {
     replaceAll?: boolean
   ) => Promise<void>;
   onResetSeedData: () => Promise<void>;
+  departmentLogoUrl?: string;
+  onUpdateDepartmentLogo?: (newLogoUrl: string) => Promise<void>;
 }
 
 type TeacherTab = 'overview' | 'questions' | 'students' | 'attempts';
@@ -96,6 +100,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   onDeleteQuestion,
   onBatchSaveQuestions,
   onResetSeedData,
+  departmentLogoUrl = '',
+  onUpdateDepartmentLogo,
 }) => {
   const [activeTab, setActiveTab] = useState<TeacherTab>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -455,151 +461,328 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Top Bar tuân thủ chuẩn 3-Zone Contract */}
-      <header className="flex items-center justify-between gap-8 px-6 py-4 bg-white border-b border-slate-200 sticky top-0 z-20">
-        {/* Zone 1: Brand Wordmark */}
-        <a
-          href="#teacher-home"
-          onClick={(e) => {
-            e.preventDefault();
-            setActiveTab('overview');
-          }}
-          className="text-lg font-bold tracking-tight text-teal-800 whitespace-nowrap shrink-0"
-        >
-          Certiport GenAI Admin
-        </a>
+  const handleUploadDepartmentLogoFromAdmin = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file || !onUpdateDepartmentLogo) return;
+    try {
+      const base64 = await compressImageFileToBase64(file);
+      await onUpdateDepartmentLogo(base64);
+      setBankStatusMessage({
+        type: 'success',
+        text: 'Đã cập nhật Logo Tổ Toán - Tin · Trường IGC Tây Ninh thành công!',
+      });
+    } catch (err) {
+      setBankStatusMessage({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Không thể tải ảnh logo. Vui lòng thử lại.',
+      });
+    }
+  };
 
-        {/* Zone 2: 4 Single-line Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      {/* LEFT SIDEBAR CHO DESKTOP (GIÁO VIÊN / QUẢN TRỊ VIÊN) */}
+      <aside
+        data-testid="teacher-sidebar"
+        aria-label="Thanh điều hướng Giáo viên"
+        className="hidden md:flex md:flex-col md:w-64 lg:w-68 md:shrink-0 bg-white border-r border-slate-200 md:sticky md:top-0 md:h-screen z-30 select-none"
+      >
+        {/* Zone 1: Brand Wordmark & Logo Tổ Toán - Tin IGC Tây Ninh */}
+        <div className="px-4 py-4 border-b border-slate-200">
+          <a
+            href="#teacher-home"
+            onClick={(e) => {
+              e.preventDefault();
+              setActiveTab('overview');
+            }}
+            className="flex items-center gap-2.5 group min-w-0"
+          >
+            <div className="keep-light w-10 h-10 rounded-full bg-white border border-teal-200 flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
+              {departmentLogoUrl ? (
+                <img
+                  src={departmentLogoUrl}
+                  alt="Logo Tổ Toán - Tin"
+                  className="w-full h-full object-contain rounded-full p-0.5"
+                />
+              ) : (
+                <IgcToanTinDefaultEmblem className="w-8 h-8" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-extrabold tracking-tight text-teal-900 truncate">
+                Tổ Toán - Tin · IGC
+              </div>
+              <div className="text-[11px] font-medium text-slate-500 truncate">
+                Quản trị Hệ thống GenAI
+              </div>
+            </div>
+          </a>
+        </div>
+
+        {/* Thông tin Quản trị viên trong Sidebar */}
+        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/70 space-y-2">
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-slate-900 truncate">
+              {currentUser.fullName}
+            </div>
+            <div className="text-[11px] text-slate-500 truncate">
+              Tài khoản:{' '}
+              <strong className="font-mono text-teal-800">
+                {currentUser.username}
+              </strong>{' '}
+              · <span className="text-teal-700 font-semibold">Giáo viên</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5 pt-0.5 tabular-nums">
+            <div className="px-2 py-1 rounded-md bg-white border border-slate-200/80">
+              <span className="text-[10px] text-slate-400 block">Câu hỏi</span>
+              <span className="font-mono font-bold text-xs text-teal-800">
+                {questions.length} câu
+              </span>
+            </div>
+            <div className="px-2 py-1 rounded-md bg-white border border-slate-200/80">
+              <span className="text-[10px] text-slate-400 block">Tài khoản</span>
+              <span className="font-mono font-bold text-xs text-slate-800">
+                {users.length} TK
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Zone 2: 4 Vertical Navigation Links */}
+        <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
+          <div className="px-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            Phân hệ Quản trị
+          </div>
+
           <button
             type="button"
+            data-testid="teacher-nav-overview"
             onClick={() => setActiveTab('overview')}
-            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+            className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
               activeTab === 'overview'
-                ? 'border-teal-700 text-teal-800 font-semibold'
-                : 'border-transparent hover:text-slate-900'
+                ? 'bg-teal-700 text-white shadow-2xs'
+                : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
-            Tổng quan hệ thống
+            <span className="inline-flex items-center gap-2.5 truncate">
+              <Layers className="w-4 h-4 shrink-0" />
+              <span className="truncate">Tổng quan hệ thống</span>
+            </span>
           </button>
+
           <button
             type="button"
+            data-testid="teacher-nav-questions"
             onClick={() => setActiveTab('questions')}
-            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+            className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
               activeTab === 'questions'
-                ? 'border-teal-700 text-teal-800 font-semibold'
-                : 'border-transparent hover:text-slate-900'
+                ? 'bg-teal-700 text-white shadow-2xs'
+                : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
-            Quản lý Ngân hàng Câu hỏi ({questions.length})
+            <span className="inline-flex items-center gap-2.5 truncate">
+              <Database className="w-4 h-4 shrink-0" />
+              <span className="truncate">Ngân hàng Câu hỏi</span>
+            </span>
+            <span
+              className={`px-1.5 py-0.5 text-[11px] font-mono font-bold rounded-md tabular-nums ${
+                activeTab === 'questions'
+                  ? 'bg-teal-800 text-teal-100'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {questions.length}
+            </span>
           </button>
+
           <button
             type="button"
+            data-testid="teacher-nav-students"
             onClick={() => setActiveTab('students')}
-            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+            className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
               activeTab === 'students'
-                ? 'border-teal-700 text-teal-800 font-semibold'
-                : 'border-transparent hover:text-slate-900'
+                ? 'bg-teal-700 text-white shadow-2xs'
+                : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
-            Quản lý học sinh ({studentAccounts.length})
+            <span className="inline-flex items-center gap-2.5 truncate">
+              <Eye className="w-4 h-4 shrink-0" />
+              <span className="truncate">Quản lý Tài khoản</span>
+            </span>
+            <span
+              className={`px-1.5 py-0.5 text-[11px] font-mono font-bold rounded-md tabular-nums ${
+                activeTab === 'students'
+                  ? 'bg-teal-800 text-teal-100'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {users.length}
+            </span>
           </button>
+
           <button
             type="button"
+            data-testid="teacher-nav-attempts"
             onClick={() => setActiveTab('attempts')}
-            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+            className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
               activeTab === 'attempts'
-                ? 'border-teal-700 text-teal-800 font-semibold'
-                : 'border-transparent hover:text-slate-900'
+                ? 'bg-teal-700 text-white shadow-2xs'
+                : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
             }`}
           >
-            Kết quả luyện thi ({attempts.length})
+            <span className="inline-flex items-center gap-2.5 truncate">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <span className="truncate">Kết quả Luyện thi</span>
+            </span>
+            <span
+              className={`px-1.5 py-0.5 text-[11px] font-mono font-bold rounded-md tabular-nums ${
+                activeTab === 'attempts'
+                  ? 'bg-teal-800 text-teal-100'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {attempts.length}
+            </span>
           </button>
         </nav>
 
-        {/* Zone 3: 1 Primary Action */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Zone 3: Sidebar Footer Action (Dark Mode + Logout) */}
+        <div className="p-3 border-t border-slate-200 space-y-2 bg-slate-50/40">
+          <ThemeToggleButton
+            variant="sidebar"
+            testId="teacher-sidebar-theme-toggle"
+          />
           <button
             type="button"
             onClick={onLogout}
-            className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+            className="w-full px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 border border-transparent rounded-xl transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>Đăng xuất ({currentUser.username})</span>
           </button>
         </div>
-      </header>
+      </aside>
 
-      {/* Mobile Tabs */}
-      <div className="md:hidden flex items-center gap-1 px-4 py-2 bg-white border-b border-slate-200 overflow-x-auto">
-        <button
-          type="button"
-          onClick={() => setActiveTab('overview')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-            activeTab === 'overview'
-              ? 'bg-teal-700 text-white'
-              : 'text-slate-600'
-          }`}
-        >
-          Tổng quan
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('questions')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-            activeTab === 'questions'
-              ? 'bg-teal-700 text-white'
-              : 'text-slate-600'
-          }`}
-        >
-          Ngân hàng Câu hỏi ({questions.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('students')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-            activeTab === 'students'
-              ? 'bg-teal-700 text-white'
-              : 'text-slate-600'
-          }`}
-        >
-          Học sinh ({studentAccounts.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('attempts')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-            activeTab === 'attempts'
-              ? 'bg-teal-700 text-white'
-              : 'text-slate-600'
-          }`}
-        >
-          Kết quả ({attempts.length})
-        </button>
+      {/* Mobile Top Bar & Tabs (< 768px) */}
+      <div className="md:hidden bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100">
+          <a
+            href="#teacher-home"
+            onClick={(e) => {
+              e.preventDefault();
+              setActiveTab('overview');
+            }}
+            className="text-sm font-extrabold tracking-tight text-teal-800"
+          >
+            Tổ Toán - Tin · IGC Tây Ninh
+          </a>
+          <div className="flex items-center gap-2">
+            <ThemeToggleButton
+              variant="compact"
+              testId="teacher-mobile-theme-toggle"
+            />
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+            >
+              <LogOut className="w-3 h-3" />
+              <span>Đăng xuất</span>
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 px-3 py-1.5 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
+              activeTab === 'overview'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600'
+            }`}
+          >
+            Tổng quan
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('questions')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
+              activeTab === 'questions'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600'
+            }`}
+          >
+            Ngân hàng ({questions.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('students')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
+              activeTab === 'students'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600'
+            }`}
+          >
+            Quản lý Tài khoản ({users.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('attempts')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
+              activeTab === 'attempts'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600'
+            }`}
+          >
+            Kết quả ({attempts.length})
+          </button>
+        </div>
       </div>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
-        {/* Thanh trạng thái Quản trị viên */}
+      <main className="flex-1 min-w-0 max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 sm:py-6 space-y-5">
+        {/* Thanh trạng thái Quản trị viên Tổ Toán - Tin IGC Tây Ninh */}
         <section className="bg-white border border-slate-200 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="text-xs text-slate-500">
+              Đơn vị: <strong className="text-teal-800">Tổ Toán - Tin · Trường IGC Tây Ninh</strong> ·{' '}
               Quản trị viên:{' '}
-              <strong className="text-slate-900">{currentUser.fullName}</strong> ·
-              Tài khoản:{' '}
+              <strong className="text-slate-900">{currentUser.fullName}</strong> (
               <strong className="font-mono text-teal-800">
                 {currentUser.username}
-              </strong>{' '}
-              · Phân quyền: <strong className="text-teal-700">teacher</strong>
+              </strong>
+              )
             </div>
             <h1 className="text-lg sm:text-xl font-bold text-slate-900">
-              Hệ thống Quản lý Ngân hàng Câu hỏi & Khảo thí Certiport Generative AI
+              Hệ thống Quản lý Ngân hàng Câu hỏi, Tài khoản & Khảo thí Certiport Generative AI
             </h1>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {onUpdateDepartmentLogo && (
+              <>
+                <input
+                  type="file"
+                  accept="image/*"
+                  id="admin-upload-logo-input"
+                  onChange={handleUploadDepartmentLogoFromAdmin}
+                  className="hidden"
+                />
+                <label
+                  htmlFor="admin-upload-logo-input"
+                  className="px-3.5 py-2 rounded-lg border border-teal-600/40 bg-teal-50/70 hover:bg-teal-100 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-teal-700" />
+                  <span>Đổi Logo Tổ Toán - Tin</span>
+                </label>
+              </>
+            )}
             <button
               type="button"
               disabled={isResettingSeed}

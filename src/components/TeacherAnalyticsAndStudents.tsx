@@ -13,6 +13,7 @@ import {
   KeyRound,
   RotateCcw,
   Search,
+  ShieldCheck,
   Trash2,
   Upload,
   UserPlus,
@@ -25,6 +26,7 @@ import {
   Question,
   UserAccount,
   UserAnswer,
+  UserRole,
 } from '../types/exam';
 import {
   StudentProgressSummary,
@@ -87,6 +89,28 @@ export const TeacherClassAnalytics: React.FC<TeacherClassAnalyticsProps> = ({
       ),
     [analytics.studentRows]
   );
+
+  const avgStudySecondsPerStudent = useMemo(
+    () =>
+      analytics.studentRows.length > 0
+        ? Math.round(totalStudySecondsAll / analytics.studentRows.length)
+        : 0,
+    [totalStudySecondsAll, analytics.studentRows.length]
+  );
+
+  const highestMockExamScore1000 = useMemo(() => {
+    const scores = analytics.studentRows.map((r) => r.highestScore1000 || 0);
+    return scores.length > 0 ? Math.max(...scores) : 0;
+  }, [analytics.studentRows]);
+
+  const bankCompletionPercent = useMemo(() => {
+    if (analytics.studentRows.length === 0 || questions.length === 0) return 0;
+    const totalPracticedRatio = analytics.studentRows.reduce(
+      (sum, r) => sum + Math.min(1, r.practicedCount / Math.max(1, questions.length)),
+      0
+    );
+    return Math.round((totalPracticedRatio / analytics.studentRows.length) * 100);
+  }, [analytics.studentRows, questions.length]);
 
   const handleExportClassReportExcel = () => {
     const bytes = buildClassReportWorkbookBytes(questions, users, attempts);
@@ -157,57 +181,85 @@ export const TeacherClassAnalytics: React.FC<TeacherClassAnalyticsProps> = ({
         </div>
       )}
 
-      {/* 4 Chỉ số KPI Tổng hợp Lớp học */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 tabular-nums">
-        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-1">
-          <div className="text-xs text-slate-500">Sĩ số & Trạng thái Học sinh</div>
+      {/* 4 Thẻ Chỉ Số Tổng Quan (Metric Cards) của Bảng điều khiển Giáo viên */}
+      <div
+        data-testid="teacher-metric-cards"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 tabular-nums"
+      >
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-200 space-y-1.5">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
+            <span>Tổng số Học sinh</span>
+            <Users className="w-4 h-4 text-teal-700" />
+          </div>
           <div className="text-2xl font-bold font-mono text-slate-900">
             {analytics.studentRows.length} học sinh
           </div>
-          <div className="text-xs text-emerald-700 font-medium">
-            Đang trực tuyến / ôn tập: {analytics.totalActiveStudents} HS
+          <div className="text-xs text-emerald-700 font-medium flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+            <span>
+              Đang Online: {analytics.totalActiveStudents} HS · Offline:{' '}
+              {Math.max(0, analytics.studentRows.length - analytics.totalActiveStudents)} HS
+            </span>
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-1">
-          <div className="text-xs text-slate-500">
-            Điểm Thi thử Trung bình Toàn lớp
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-200 space-y-1.5">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
+            <span>Thời gian Ôn tập Trung bình</span>
+            <Clock className="w-4 h-4 text-teal-700" />
           </div>
           <div className="text-2xl font-bold font-mono text-teal-800">
-            {analytics.classAverageScore1000} / 1000
+            {formatStudyDuration(avgStudySecondsPerStudent)}
           </div>
           <div className="text-xs text-slate-500">
-            Tỷ lệ Đạt chuẩn (&ge;700):{' '}
-            <strong className="text-slate-800">
-              {analytics.classPassRatePercent}%
+            Tổng toàn lớp:{' '}
+            <strong className="text-slate-800 font-mono">
+              {formatStudyDuration(totalStudySecondsAll)}
+            </strong>
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-200 space-y-1.5">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
+            <span>Điểm Thi thử Cao nhất</span>
+            <Award className="w-4 h-4 text-teal-700" />
+          </div>
+          <div className="text-2xl font-bold font-mono text-teal-800">
+            {highestMockExamScore1000} / 1000
+          </div>
+          <div className="text-xs text-slate-500">
+            TB lớp:{' '}
+            <strong className="text-slate-800 font-mono">
+              {analytics.classAverageScore1000}/1000
             </strong>{' '}
-            ({attempts.length} lượt thi)
+            · Đạt chuẩn:{' '}
+            <strong className="text-emerald-700">
+              {analytics.classPassRatePercent}%
+            </strong>
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-1">
-          <div className="text-xs text-slate-500">
-            Tổng Thời gian Ôn tập Toàn lớp
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-200 space-y-1.5">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500">
+            <span>Tỷ lệ Hoàn thành Ngân hàng đề</span>
+            <BookOpen className="w-4 h-4 text-teal-700" />
           </div>
-          <div className="text-2xl font-bold font-mono text-teal-800">
-            {formatStudyDuration(totalStudySecondsAll)}
+          <div className="text-2xl font-bold font-mono text-slate-900">
+            {bankCompletionPercent}%
           </div>
-          <div className="text-xs text-slate-500">
-            Đồng bộ tự động theo thời gian thực
-          </div>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-1">
-          <div className="text-xs text-slate-500">
-            Câu hỏi Bẫy sai nhiều nhất
-          </div>
-          <div className="text-2xl font-bold font-mono text-rose-700">
-            {analytics.trapQuestions[0]
-              ? `${analytics.trapQuestions[0].question.id.toUpperCase()} (${analytics.trapQuestions[0].wrongRatePercent}% sai)`
-              : 'Chưa có'}
+          <div className="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-teal-600 transition-all duration-300"
+              style={{ width: `${Math.max(4, bankCompletionPercent)}%` }}
+            />
           </div>
           <div className="text-xs text-slate-500">
-            Tổng ngân hàng đề: {questions.length} câu hỏi
+            Ngân hàng đề: {questions.length} câu · Câu bẫy nhất:{' '}
+            <strong className="text-rose-700 font-mono">
+              {analytics.trapQuestions[0]
+                ? `${analytics.trapQuestions[0].question.id.toUpperCase()} (${analytics.trapQuestions[0].wrongRatePercent}%)`
+                : 'Chưa có'}
+            </strong>
           </div>
         </div>
       </div>
@@ -411,22 +463,22 @@ export const TeacherClassAnalytics: React.FC<TeacherClassAnalyticsProps> = ({
                         / {item.totalChecks} tổng lượt làm ({item.studentsCurrentlyStruggling} HS đang vướng)
                       </div>
                     </td>
-                    <td className="py-3.5 px-4 w-40">
-                      <div className="space-y-1">
+                    <td className="py-3.5 px-4 w-44">
+                      <div className="space-y-1.5">
                         <span
                           className={`font-mono text-xs font-bold ${
-                            isHighRisk ? 'text-rose-700' : 'text-slate-700'
+                            isHighRisk ? 'text-rose-700' : 'text-rose-600'
                           }`}
                         >
                           {item.wrongRatePercent}% sai
                         </span>
-                        <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
+                        <div className="w-full h-2.5 rounded-full bg-rose-100/80 overflow-hidden">
                           <div
-                            className={`h-full rounded-full ${
-                              isHighRisk ? 'bg-rose-600' : 'bg-amber-500'
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              isHighRisk ? 'bg-rose-600' : 'bg-rose-500'
                             }`}
                             style={{
-                              width: `${Math.max(4, item.wrongRatePercent)}%`,
+                              width: `${Math.max(6, item.wrongRatePercent)}%`,
                             }}
                           />
                         </div>
@@ -437,10 +489,10 @@ export const TeacherClassAnalytics: React.FC<TeacherClassAnalyticsProps> = ({
                         type="button"
                         data-testid={`quick-review-trap-${item.question.id}`}
                         onClick={() => handleOpenQuickReview(item.question)}
-                        className="px-3 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                        className="px-3.5 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-2xs transition-all duration-200 cursor-pointer whitespace-nowrap"
                       >
                         <Eye className="w-3.5 h-3.5" />
-                        <span>Xem nhanh & Sửa bài</span>
+                        <span>Xem đề & Sửa bài</span>
                       </button>
                     </td>
                   </tr>
@@ -528,7 +580,7 @@ export const TeacherClassAnalytics: React.FC<TeacherClassAnalyticsProps> = ({
 };
 
 // ============================================================================
-// 2. PHÂN HỆ QUẢN LÝ TÀI KHOẢN & TIẾN ĐỘ HỌC SINH TOÀN DIỆN
+// 2. PHÂN HỆ QUẢN LÝ TÀI KHOẢN (GIÁO VIÊN QUẢN TRỊ & HỌC SINH) TOÀN DIỆN
 // ============================================================================
 
 interface TeacherStudentManagerProps {
@@ -552,12 +604,21 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
   onResetStudentProgress,
   onDeleteStudent,
 }) => {
+  const [newAccountRole, setNewAccountRole] = useState<UserRole>('student');
   const [newStudentId, setNewStudentId] = useState('');
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentPassword, setNewStudentPassword] = useState('123456');
   const [newStudentClass, setNewStudentClass] = useState(
     'Lớp 12A1 - Đội tuyển GenAI'
   );
+  const [accountRoleFilter, setAccountRoleFilter] = useState<
+    'ALL' | 'TEACHER' | 'STUDENT'
+  >('ALL');
+  const [studentStatusFilter, setStudentStatusFilter] = useState<
+    'ALL' | 'ONLINE' | 'OFFLINE'
+  >('ALL');
+  const [studentPage, setStudentPage] = useState<number>(1);
+  const STUDENT_PAGE_SIZE = 8;
   const [studentSearch, setStudentSearch] = useState('');
   const [statusBanner, setStatusBanner] = useState<{
     type: 'success' | 'error';
@@ -565,7 +626,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
   } | null>(null);
   const [isImportingExcel, setIsImportingExcel] = useState(false);
 
-  // Các Modal thao tác cho từng học sinh
+  // Các Modal thao tác cho từng tài khoản
   const [historyStudentRow, setHistoryStudentRow] =
     useState<StudentProgressSummary | null>(null);
   const [passwordStudent, setPasswordStudent] = useState<UserAccount | null>(
@@ -585,18 +646,66 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
     [questions, users, attempts]
   );
 
+  const teacherAccounts = useMemo(
+    () => users.filter((u) => u.role === 'teacher'),
+    [users]
+  );
+
+  const filteredTeachers = useMemo(() => {
+    const q = studentSearch.trim().toLowerCase();
+    if (!q) return teacherAccounts;
+    return teacherAccounts.filter(
+      (t) =>
+        t.username.toLowerCase().includes(q) ||
+        t.fullName.toLowerCase().includes(q) ||
+        (t.className || '').toLowerCase().includes(q)
+    );
+  }, [teacherAccounts, studentSearch]);
+
   const filteredStudentRows = useMemo(() => {
     const q = studentSearch.trim().toLowerCase();
-    if (!q) return analytics.studentRows;
-    return analytics.studentRows.filter(
-      (r) =>
-        r.student.username.toLowerCase().includes(q) ||
-        r.student.fullName.toLowerCase().includes(q) ||
-        (r.student.className || '').toLowerCase().includes(q)
-    );
-  }, [analytics.studentRows, studentSearch]);
+    return analytics.studentRows.filter((r) => {
+      const st = r.student;
+      const isOnline =
+        st.activeStatus === 'studying' ||
+        st.activeStatus === 'online' ||
+        st.status === 'studying' ||
+        st.status === 'online';
 
-  // Thêm học sinh thủ công
+      if (studentStatusFilter === 'ONLINE' && !isOnline) return false;
+      if (studentStatusFilter === 'OFFLINE' && isOnline) return false;
+
+      if (!q) return true;
+      return (
+        st.username.toLowerCase().includes(q) ||
+        st.fullName.toLowerCase().includes(q) ||
+        (st.className || '').toLowerCase().includes(q)
+      );
+    });
+  }, [analytics.studentRows, studentSearch, studentStatusFilter]);
+
+  const totalStudentPages = Math.max(
+    1,
+    Math.ceil(filteredStudentRows.length / STUDENT_PAGE_SIZE)
+  );
+  const safeStudentPage = Math.min(studentPage, totalStudentPages);
+  const paginatedStudentRows = useMemo(() => {
+    const start = (safeStudentPage - 1) * STUDENT_PAGE_SIZE;
+    return filteredStudentRows.slice(start, start + STUDENT_PAGE_SIZE);
+  }, [filteredStudentRows, safeStudentPage]);
+
+  const handleSelectRoleForCreate = (role: UserRole) => {
+    setNewAccountRole(role);
+    if (role === 'teacher') {
+      setNewStudentPassword('igc123456');
+      setNewStudentClass('Tổ Toán - Tin · Trường IGC Tây Ninh');
+    } else {
+      setNewStudentPassword('123456');
+      setNewStudentClass('Lớp 12A1 - Đội tuyển GenAI');
+    }
+  };
+
+  // Thêm tài khoản mới (Học sinh hoặc Giáo viên Quản trị)
   const handleCreateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusBanner(null);
@@ -607,19 +716,32 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
     ) {
       setStatusBanner({
         type: 'error',
-        text: 'Vui lòng điền đầy đủ Mã học sinh, Họ tên và Mật khẩu.',
+        text: 'Vui lòng điền đầy đủ Mã định danh (Username), Họ tên và Mật khẩu.',
       });
       return;
     }
 
     const cleanId = newStudentId.trim().replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!cleanId) {
+      setStatusBanner({
+        type: 'error',
+        text: 'Mã tài khoản chỉ được chứa chữ cái không dấu, chữ số, dấu gạch ngang hoặc gạch dưới.',
+      });
+      return;
+    }
+
+    const isTeacher = newAccountRole === 'teacher';
     const account: UserAccount = {
       id: cleanId,
       username: cleanId,
       password: newStudentPassword.trim(),
       fullName: newStudentName.trim(),
-      role: 'student',
-      className: newStudentClass.trim() || 'Lớp Luyện thi Certiport',
+      role: isTeacher ? 'teacher' : 'student',
+      className:
+        newStudentClass.trim() ||
+        (isTeacher
+          ? 'Tổ Toán - Tin · Trường IGC Tây Ninh'
+          : 'Lớp Luyện thi Certiport'),
       lastLogin: new Date().toISOString(),
       status: 'offline',
       activeStatus: 'offline',
@@ -635,10 +757,12 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
     await onSaveStudent(account);
     setNewStudentId('');
     setNewStudentName('');
-    setNewStudentPassword('123456');
+    setNewStudentPassword(isTeacher ? 'igc123456' : '123456');
     setStatusBanner({
       type: 'success',
-      text: `Đã thêm tài khoản học sinh "${account.fullName}" (${account.username}) lên Firebase Firestore!`,
+      text: isTeacher
+        ? `Đã tạo tài khoản Quản trị viên / Giáo viên "${account.fullName}" (${account.username}) thành công!`
+        : `Đã tạo tài khoản Học sinh "${account.fullName}" (${account.username}) thành công!`,
     });
   };
 
@@ -670,7 +794,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
       await onBatchSaveStudents(importedStudents);
       setStatusBanner({
         type: 'success',
-        text: `Đã nhập thành công ${importedStudents.length} tài khoản học sinh từ file Excel "${file.name}" lên Firestore!`,
+        text: `Đã nhập thành công ${importedStudents.length} tài khoản học sinh từ file Excel "${file.name}"!`,
       });
     } catch (err) {
       setStatusBanner({
@@ -705,7 +829,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
     });
   };
 
-  // Xác nhận Đổi mật khẩu học sinh
+  // Xác nhận Đổi mật khẩu tài khoản (Giáo viên hoặc Học sinh)
   const handleConfirmChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passwordStudent || !newPasswordValue.trim()) return;
@@ -717,7 +841,9 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
       );
       setStatusBanner({
         type: 'success',
-        text: `Đã đổi mật khẩu mới cho học sinh ${passwordStudent.fullName} (${passwordStudent.username}).`,
+        text: `Đã đổi mật khẩu mới cho tài khoản ${
+          passwordStudent.role === 'teacher' ? 'Giáo viên' : 'Học sinh'
+        } ${passwordStudent.fullName} (${passwordStudent.username}).`,
       });
       setPasswordStudent(null);
       setNewPasswordValue('');
@@ -742,7 +868,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
     }
   };
 
-  // Xác nhận Xóa tài khoản học sinh
+  // Xác nhận Xóa tài khoản (Giáo viên hoặc Học sinh)
   const handleConfirmDeleteStudent = async () => {
     if (!deleteStudentTarget) return;
     setIsProcessingAction(true);
@@ -750,7 +876,9 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
       await onDeleteStudent(deleteStudentTarget.id);
       setStatusBanner({
         type: 'success',
-        text: `Đã xóa tài khoản học sinh ${deleteStudentTarget.fullName} (${deleteStudentTarget.username}) khỏi hệ thống.`,
+        text: `Đã xóa tài khoản ${
+          deleteStudentTarget.role === 'teacher' ? 'Giáo viên' : 'Học sinh'
+        } ${deleteStudentTarget.fullName} (${deleteStudentTarget.username}) khỏi hệ thống.`,
       });
       setDeleteStudentTarget(null);
     } finally {
@@ -760,15 +888,16 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Thanh công cụ Nhập/Xuất Danh sách Học sinh & Xuất Báo cáo Lớp học (.xlsx) */}
+      {/* Thanh công cụ Quản lý Tài khoản (Giáo viên Quản trị & Học sinh) */}
       <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1">
             <h2 className="text-base sm:text-lg font-bold text-slate-900">
-              Quản lý Tài khoản & Tiến độ Học tập của Học sinh ({analytics.studentRows.length} học sinh)
+              Quản lý Tài khoản Giáo viên & Học sinh ({teacherAccounts.length}{' '}
+              Giáo viên · {analytics.studentRows.length} Học sinh)
             </h2>
             <p className="text-xs text-slate-500">
-              Cấp tài khoản lẻ hoặc nhập hàng loạt từ Excel, theo dõi tiến độ luyện tập, điểm thi thử và quản trị dữ liệu từng học sinh.
+              Cấp thêm tài khoản Quản trị viên cho Giáo viên Tổ Toán - Tin, thêm tài khoản Học sinh lẻ hoặc nhập hàng loạt từ Excel.
             </p>
           </div>
 
@@ -843,116 +972,401 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
           </div>
         )}
 
-        {/* Form Thêm nhanh Học sinh mới */}
-        <form
-          onSubmit={handleCreateStudent}
-          className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end"
-        >
-          <div>
-            <label
-              htmlFor="new-student-id"
-              className="block text-xs font-semibold text-slate-700 mb-1"
-            >
-              Mã học sinh (Student ID) *
-            </label>
-            <input
-              id="new-student-id"
-              type="text"
-              required
-              value={newStudentId}
-              onChange={(e) => setNewStudentId(e.target.value)}
-              placeholder="Ví dụ: HS003"
-              className="w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-300 font-mono"
-            />
+        {/* Bộ chọn Loại Tài khoản muốn cấp mới: Học sinh hoặc Giáo viên Quản trị */}
+        <div className="pt-3 border-t border-slate-100 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 border border-slate-200">
+              <button
+                type="button"
+                data-testid="select-create-role-student"
+                onClick={() => handleSelectRoleForCreate('student')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer ${
+                  newAccountRole === 'student'
+                    ? 'bg-teal-700 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Tạo Tài khoản Học sinh</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="select-create-role-teacher"
+                onClick={() => handleSelectRoleForCreate('teacher')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer ${
+                  newAccountRole === 'teacher'
+                    ? 'bg-indigo-700 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Tạo Tài khoản Quản trị (Giáo viên)</span>
+              </button>
+            </div>
+
+            <span className="text-xs text-slate-500">
+              {newAccountRole === 'teacher'
+                ? 'Tài khoản Giáo viên có toàn quyền quản lý Ngân hàng câu hỏi, Tài khoản và Báo cáo lớp học.'
+                : 'Tài khoản Học sinh dùng để ôn luyện từng câu, ôn Kho câu sai và làm bài Thi thử.'}
+            </span>
           </div>
 
-          <div>
-            <label
-              htmlFor="new-student-name"
-              className="block text-xs font-semibold text-slate-700 mb-1"
-            >
-              Họ và tên học sinh *
-            </label>
-            <input
-              id="new-student-name"
-              type="text"
-              required
-              value={newStudentName}
-              onChange={(e) => setNewStudentName(e.target.value)}
-              placeholder="Ví dụ: Lê Thị Bảo Ngọc"
-              className="w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-300"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="new-student-pass"
-              className="block text-xs font-semibold text-slate-700 mb-1"
-            >
-              Mật khẩu khởi tạo *
-            </label>
-            <input
-              id="new-student-pass"
-              type="text"
-              required
-              value={newStudentPassword}
-              onChange={(e) => setNewStudentPassword(e.target.value)}
-              className="w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-300 font-mono"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="new-student-class"
-              className="block text-xs font-semibold text-slate-700 mb-1"
-            >
-              Lớp / Đội tuyển
-            </label>
-            <input
-              id="new-student-class"
-              type="text"
-              value={newStudentClass}
-              onChange={(e) => setNewStudentClass(e.target.value)}
-              placeholder="Ví dụ: Lớp 12A1"
-              className="w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-300"
-            />
-          </div>
-
-          <button
-            type="submit"
-            data-testid="add-single-student-btn"
-            className="py-2.5 px-4 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+          {/* Form Thêm nhanh Tài khoản (Học sinh hoặc Giáo viên Quản trị) */}
+          <form
+            onSubmit={handleCreateStudent}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end"
           >
-            <UserPlus className="w-4 h-4" />
-            <span>Thêm Học sinh</span>
-          </button>
-        </form>
+            <div>
+              <label
+                htmlFor="new-student-id"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                {newAccountRole === 'teacher'
+                  ? 'Tên đăng nhập Giáo viên *'
+                  : 'Mã học sinh (Student ID) *'}
+              </label>
+              <input
+                id="new-student-id"
+                type="text"
+                required
+                value={newStudentId}
+                onChange={(e) => setNewStudentId(e.target.value)}
+                placeholder={
+                  newAccountRole === 'teacher'
+                    ? 'Ví dụ: gv_toantin01'
+                    : 'Ví dụ: HS003'
+                }
+                className="w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-300 font-mono"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="new-student-name"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                {newAccountRole === 'teacher'
+                  ? 'Họ và tên Giáo viên *'
+                  : 'Họ và tên Học sinh *'}
+              </label>
+              <input
+                id="new-student-name"
+                type="text"
+                required
+                value={newStudentName}
+                onChange={(e) => setNewStudentName(e.target.value)}
+                placeholder={
+                  newAccountRole === 'teacher'
+                    ? 'Ví dụ: Thầy Nguyễn Văn A'
+                    : 'Ví dụ: Lê Thị Bảo Ngọc'
+                }
+                className="w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-300"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="new-student-pass"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                Mật khẩu khởi tạo *
+              </label>
+              <input
+                id="new-student-pass"
+                type="text"
+                required
+                value={newStudentPassword}
+                onChange={(e) => setNewStudentPassword(e.target.value)}
+                className="w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-300 font-mono"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="new-student-class"
+                className="block text-xs font-semibold text-slate-700 mb-1"
+              >
+                {newAccountRole === 'teacher'
+                  ? 'Tổ chuyên môn / Đơn vị'
+                  : 'Lớp / Đội tuyển'}
+              </label>
+              <input
+                id="new-student-class"
+                type="text"
+                value={newStudentClass}
+                onChange={(e) => setNewStudentClass(e.target.value)}
+                placeholder={
+                  newAccountRole === 'teacher'
+                    ? 'Tổ Toán - Tin · Trường IGC Tây Ninh'
+                    : 'Ví dụ: Lớp 12A1'
+                }
+                className="w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-slate-300"
+              />
+            </div>
+
+            <button
+              type="submit"
+              data-testid="add-single-student-btn"
+              className={`py-2.5 px-3.5 rounded-lg text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer ${
+                newAccountRole === 'teacher'
+                  ? 'bg-indigo-700 hover:bg-indigo-800'
+                  : 'bg-teal-700 hover:bg-teal-800'
+              }`}
+            >
+              {newAccountRole === 'teacher' ? (
+                <>
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>Thêm Giáo viên</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus className="w-4 h-4 shrink-0" />
+                  <span>Thêm Học sinh</span>
+                </>
+              )}
+            </button>
+          </form>
+        </div>
       </section>
 
-      {/* BẢNG THEO DÕI HỌC SINH TRỰC QUAN & THAO TÁC CHI TIẾT */}
+      {/* Thanh Bộ lọc Loại tài khoản & Ô tìm kiếm chung */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex items-center gap-1.5 p-1 rounded-xl bg-white border border-slate-200">
+          <button
+            type="button"
+            onClick={() => setAccountRoleFilter('ALL')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+              accountRoleFilter === 'ALL'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            Tất cả tài khoản ({users.length})
+          </button>
+          <button
+            type="button"
+            data-testid="filter-accounts-teacher"
+            onClick={() => setAccountRoleFilter('TEACHER')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+              accountRoleFilter === 'TEACHER'
+                ? 'bg-indigo-700 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            Giáo viên Quản trị ({teacherAccounts.length})
+          </button>
+          <button
+            type="button"
+            data-testid="filter-accounts-student"
+            onClick={() => setAccountRoleFilter('STUDENT')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+              accountRoleFilter === 'STUDENT'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            Học sinh ({analytics.studentRows.length})
+          </button>
+        </div>
+
+        <div className="relative w-full sm:w-80">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={studentSearch}
+            onChange={(e) => setStudentSearch(e.target.value)}
+            placeholder="Tìm Mã đăng nhập, Họ tên, Tổ hoặc Lớp..."
+            className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-300 bg-white text-slate-900"
+          />
+        </div>
+      </div>
+
+      {/* BẢNG 1: DANH SÁCH TÀI KHOẢN QUẢN TRỊ VIÊN / GIÁO VIÊN TỔ TOÁN - TIN */}
+      {(accountRoleFilter === 'ALL' || accountRoleFilter === 'TEACHER') && (
+        <section
+          data-testid="teacher-accounts-table"
+          className="bg-white border border-slate-200 rounded-xl overflow-hidden"
+        >
+          <div className="p-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 bg-indigo-50/40">
+            <div className="space-y-0.5">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-indigo-700" />
+                <span>
+                  Danh sách Tài khoản Quản trị / Giáo viên Tổ Toán - Tin (
+                  {filteredTeachers.length})
+                </span>
+              </h3>
+              <p className="text-xs text-slate-500">
+                Các tài khoản Giáo viên có quyền quản lý Ngân hàng câu hỏi, cấp tài khoản mới và xuất báo cáo kết quả lớp học.
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
+                  <th className="py-3 px-4">Tài khoản (Username) & Họ tên</th>
+                  <th className="py-3 px-4">Tổ chuyên môn / Đơn vị</th>
+                  <th className="py-3 px-4">Phân quyền</th>
+                  <th className="py-3 px-4">Đăng nhập gần nhất</th>
+                  <th className="py-3 px-4 text-right">Thao tác quản trị</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 text-sm tabular-nums">
+                {filteredTeachers.map((teacher) => {
+                  const isRootAdmin =
+                    teacher.id.toLowerCase() === 'admin' ||
+                    teacher.username.toLowerCase() === 'admin';
+                  return (
+                    <tr key={teacher.id} className="hover:bg-slate-50/80">
+                      <td className="py-3.5 px-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-indigo-800">
+                            {teacher.username}
+                          </span>
+                          <span className="text-xs font-mono text-slate-400">
+                            (MK: {teacher.password})
+                          </span>
+                          {isRootAdmin && (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-bold">
+                              Quản trị gốc
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-semibold text-slate-900">
+                          {teacher.fullName}
+                        </div>
+                      </td>
+
+                      <td className="py-3.5 px-4 text-xs text-slate-700 font-medium">
+                        {teacher.className ||
+                          'Tổ Toán - Tin · Trường IGC Tây Ninh'}
+                      </td>
+
+                      <td className="py-3.5 px-4">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-indigo-50 border border-indigo-200 text-xs font-bold text-indigo-800">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Giáo viên Quản trị</span>
+                        </span>
+                      </td>
+
+                      <td className="py-3.5 px-4 text-xs font-mono text-slate-600">
+                        {teacher.lastLogin
+                          ? new Date(teacher.lastLogin).toLocaleString('vi-VN')
+                          : 'Chưa đăng nhập'}
+                      </td>
+
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            data-testid={`change-password-${teacher.id}`}
+                            onClick={() => {
+                              setPasswordStudent(teacher);
+                              setNewPasswordValue(teacher.password);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                            <span>Đổi MK</span>
+                          </button>
+
+                          {!isRootAdmin && (
+                            <button
+                              type="button"
+                              data-testid={`delete-teacher-${teacher.id}`}
+                              onClick={() => setDeleteStudentTarget(teacher)}
+                              className="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50/60 hover:bg-rose-100 text-xs font-semibold text-rose-700 inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Xóa</span>
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* BẢNG 2: BẢNG THEO DÕI HỌC SINH TRỰC QUAN & THAO TÁC CHI TIẾT */}
+      {(accountRoleFilter === 'ALL' || accountRoleFilter === 'STUDENT') && (
       <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <div className="p-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-0.5">
             <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <Users className="w-5 h-5 text-teal-700" />
               <span>
-                Bảng Theo dõi Tiến độ & Điểm số Học sinh ({filteredStudentRows.length})
+                Bảng Theo dõi Tài khoản & Tiến độ Học sinh ({filteredStudentRows.length})
               </span>
             </h3>
             <p className="text-xs text-slate-500">
-              Theo dõi thời gian ôn tập, số câu đã luyện, kho câu sai, điểm thi thử cao nhất / trung bình và thao tác quản trị từng tài khoản.
+              Theo dõi thời gian ôn tập, số câu đã luyện, kho câu sai, điểm thi thử cao nhất / trung bình và thao tác quản trị từng tài khoản học sinh.
             </p>
           </div>
 
-          <div className="relative w-full sm:w-72">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={studentSearch}
-              onChange={(e) => setStudentSearch(e.target.value)}
-              placeholder="Tìm Mã HS, Họ tên hoặc Lớp..."
-              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-300 bg-white text-slate-900"
-            />
+          {/* Bộ lọc Trạng thái Đang Online / Offline */}
+          <div
+            data-testid="student-status-filter-group"
+            className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-100 border border-slate-200"
+          >
+            <button
+              type="button"
+              data-testid="filter-student-status-all"
+              onClick={() => {
+                setStudentStatusFilter('ALL');
+                setStudentPage(1);
+              }}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                studentStatusFilter === 'ALL'
+                  ? 'bg-teal-700 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Tất cả ({analytics.studentRows.length})
+            </button>
+            <button
+              type="button"
+              data-testid="filter-student-status-online"
+              onClick={() => {
+                setStudentStatusFilter('ONLINE');
+                setStudentPage(1);
+              }}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer ${
+                studentStatusFilter === 'ONLINE'
+                  ? 'bg-emerald-700 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span>Đang Online ({analytics.totalActiveStudents})</span>
+            </button>
+            <button
+              type="button"
+              data-testid="filter-student-status-offline"
+              onClick={() => {
+                setStudentStatusFilter('OFFLINE');
+                setStudentPage(1);
+              }}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                studentStatusFilter === 'OFFLINE'
+                  ? 'bg-slate-700 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Offline (
+              {Math.max(
+                0,
+                analytics.studentRows.length - analytics.totalActiveStudents
+              )}
+              )
+            </button>
           </div>
         </div>
 
@@ -971,7 +1385,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 text-sm tabular-nums">
-              {filteredStudentRows.map((row) => {
+              {paginatedStudentRows.map((row) => {
                 const st = row.student;
                 const isOnline =
                   st.activeStatus === 'studying' ||
@@ -1111,7 +1525,45 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Thanh phân trang danh sách học sinh mượt mà */}
+        <div
+          data-testid="student-table-pagination"
+          className="px-5 py-3 bg-slate-50/70 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600 tabular-nums"
+        >
+          <span>
+            Hiển thị{' '}
+            <strong className="text-slate-900">
+              {paginatedStudentRows.length}
+            </strong>{' '}
+            / <strong className="text-slate-900">{filteredStudentRows.length}</strong>{' '}
+            học sinh · Trang <strong className="text-teal-800">{safeStudentPage}</strong> /{' '}
+            {totalStudentPages}
+          </span>
+
+          <div className="inline-flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={safeStudentPage <= 1}
+              onClick={() => setStudentPage((p) => Math.max(1, p - 1))}
+              className="px-3 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 font-semibold text-slate-700 cursor-pointer transition-all"
+            >
+              ← Trang trước
+            </button>
+            <button
+              type="button"
+              disabled={safeStudentPage >= totalStudentPages}
+              onClick={() =>
+                setStudentPage((p) => Math.min(totalStudentPages, p + 1))
+              }
+              className="px-3 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 font-semibold text-slate-700 cursor-pointer transition-all"
+            >
+              Trang tiếp →
+            </button>
+          </div>
+        </div>
       </section>
+      )}
 
       {/* MODAL 1: XEM CHI TIẾT LỊCH SỬ BÀI LÀM CỦA HỌC SINH */}
       {historyStudentRow && (
@@ -1305,7 +1757,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
         </div>
       )}
 
-      {/* MODAL 2: ĐỔI MẬT KHẨU HỌC SINH */}
+      {/* MODAL 2: ĐỔI MẬT KHẨU TÀI KHOẢN (GIÁO VIÊN HOẶC HỌC SINH) */}
       {passwordStudent && (
         <div
           role="dialog"
@@ -1320,7 +1772,10 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
             <div className="space-y-1">
               <div className="text-xs font-bold uppercase tracking-wider text-teal-800 flex items-center gap-1.5">
                 <KeyRound className="w-4 h-4" />
-                <span>Cập nhật Mật khẩu Học sinh</span>
+                <span>
+                  Cập nhật Mật khẩu{' '}
+                  {passwordStudent.role === 'teacher' ? 'Giáo viên' : 'Học sinh'}
+                </span>
               </div>
               <h3
                 id="change-password-modal-title"
@@ -1418,7 +1873,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
         </div>
       )}
 
-      {/* MODAL 4: XÁC NHẬN XÓA TÀI KHOẢN HỌC SINH */}
+      {/* MODAL 4: XÁC NHẬN XÓA TÀI KHOẢN (GIÁO VIÊN HOẶC HỌC SINH) */}
       {deleteStudentTarget && (
         <div
           role="dialog"
@@ -1434,11 +1889,15 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                   id="delete-student-modal-title"
                   className="text-base font-bold text-slate-900"
                 >
-                  Xóa tài khoản học sinh {deleteStudentTarget.fullName} (
-                  {deleteStudentTarget.username})?
+                  Xóa tài khoản{' '}
+                  {deleteStudentTarget.role === 'teacher'
+                    ? 'Giáo viên'
+                    : 'Học sinh'}{' '}
+                  {deleteStudentTarget.fullName} ({deleteStudentTarget.username}
+                  )?
                 </h3>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Tài khoản này sẽ bị xóa khỏi danh sách lớp trên Firebase Firestore và không thể đăng nhập được nữa.
+                  Tài khoản này sẽ bị xóa khỏi hệ thống và không thể đăng nhập được nữa.
                 </p>
               </div>
             </div>

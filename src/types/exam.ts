@@ -27,6 +27,7 @@ export interface UserAccount {
   wrongQuestions?: string[];
   masteredQuestions?: string[];
   practiceProgress?: Record<string, PracticeQuestionStat>;
+  logoUrl?: string;
   createdAt?: string;
 }
 

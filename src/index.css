@@ -1,23 +1,308 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Plus Jakarta Sans', 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
 @layer base {
   :root {
-    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --font-sans: 'Plus Jakarta Sans', 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'Plus Jakarta Sans', 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  html, body, button, input, select, textarea {
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "zero" 0;
   }
 
   body {
-    font-family: var(--font-sans);
     background-color: #f8fafc;
     color: #0f172a;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
-  code, pre, .font-mono {
+  html.dark body {
+    background-color: #0b1120;
+    color: #f1f5f9;
+  }
+
+  code, pre, .font-mono, .tabular-nums, input[type="number"] {
     font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "zero" 0;
   }
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 0;
 }
+
+@keyframes feedbackSlideDown {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-feedback-reveal {
+  animation: feedbackSlideDown 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ============================================================================
+   HỆ THỐNG CHẾ ĐỘ TỐI (DARK MODE) TOÀN DIỆN — BẢO VỆ MẮT KHI ÔN TẬP DÀI GIỜ
+   ============================================================================ */
+html.dark {
+  color-scheme: dark;
+}
+
+/* 1. Bề mặt Nền & Khung Thẻ (Surfaces & Cards) */
+html.dark .bg-white:not(.keep-light) {
+  background-color: #111827 !important;
+}
+
+html.dark .bg-white\/95:not(.keep-light) {
+  background-color: rgba(17, 24, 39, 0.95) !important;
+}
+
+html.dark .bg-slate-50,
+html.dark .bg-slate-50\/40,
+html.dark .bg-slate-50\/50,
+html.dark .bg-slate-50\/60,
+html.dark .bg-slate-50\/70,
+html.dark .bg-slate-50\/80,
+html.dark .bg-slate-50\/90 {
+  background-color: #0f172a !important;
+}
+
+html.dark .bg-slate-100,
+html.dark .bg-slate-100\/80 {
+  background-color: #1e293b !important;
+}
+
+html.dark .bg-slate-200 {
+  background-color: #334155 !important;
+}
+
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-slate-50\/80:hover,
+html.dark .hover\:bg-slate-100:hover {
+  background-color: #1e293b !important;
+}
+
+html.dark .hover\:bg-slate-200:hover {
+  background-color: #334155 !important;
+}
+
+/* 2. Bề mặt ngữ nghĩa dịu mắt (Semantic Tinted Surfaces) */
+html.dark .bg-teal-50,
+html.dark .bg-teal-50\/40,
+html.dark .bg-teal-50\/50,
+html.dark .bg-teal-50\/60,
+html.dark .bg-teal-50\/70,
+html.dark .bg-teal-50\/80 {
+  background-color: rgba(19, 78, 74, 0.35) !important;
+}
+
+html.dark .bg-teal-100 {
+  background-color: rgba(15, 118, 110, 0.45) !important;
+}
+
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-50\/40,
+html.dark .bg-emerald-50\/60,
+html.dark .bg-emerald-50\/70 {
+  background-color: rgba(6, 78, 59, 0.35) !important;
+}
+
+html.dark .bg-emerald-100 {
+  background-color: rgba(6, 95, 70, 0.5) !important;
+}
+
+html.dark .bg-rose-50,
+html.dark .bg-rose-50\/50,
+html.dark .bg-rose-50\/60,
+html.dark .bg-rose-50\/70 {
+  background-color: rgba(136, 19, 55, 0.35) !important;
+}
+
+html.dark .bg-rose-100 {
+  background-color: rgba(159, 18, 57, 0.45) !important;
+}
+
+html.dark .bg-amber-50,
+html.dark .bg-amber-50\/50,
+html.dark .bg-amber-50\/60,
+html.dark .bg-amber-50\/70 {
+  background-color: rgba(120, 53, 15, 0.35) !important;
+}
+
+html.dark .bg-amber-100 {
+  background-color: rgba(146, 64, 14, 0.45) !important;
+}
+
+html.dark .bg-indigo-50,
+html.dark .bg-indigo-50\/40,
+html.dark .bg-indigo-50\/60 {
+  background-color: rgba(49, 46, 129, 0.35) !important;
+}
+
+html.dark .bg-indigo-100 {
+  background-color: rgba(55, 48, 163, 0.45) !important;
+}
+
+html.dark .bg-sky-50,
+html.dark .bg-sky-50\/60 {
+  background-color: rgba(12, 74, 110, 0.35) !important;
+}
+
+/* 3. Phân cấp Chữ độ tương phản êm dịu (Typography Contrast) */
+html.dark .text-slate-900,
+html.dark .text-slate-950 {
+  color: #f8fafc !important;
+}
+
+html.dark .text-slate-800 {
+  color: #e2e8f0 !important;
+}
+
+html.dark .text-slate-700 {
+  color: #cbd5e1 !important;
+}
+
+html.dark .text-slate-600 {
+  color: #94a3b8 !important;
+}
+
+html.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.dark .text-slate-400 {
+  color: #64748b !important;
+}
+
+html.dark .text-teal-950,
+html.dark .text-teal-900,
+html.dark .text-teal-800,
+html.dark .text-teal-700 {
+  color: #5eead4 !important;
+}
+
+html.dark .text-emerald-950,
+html.dark .text-emerald-900,
+html.dark .text-emerald-800,
+html.dark .text-emerald-700 {
+  color: #6ee7b7 !important;
+}
+
+html.dark .text-rose-950,
+html.dark .text-rose-900,
+html.dark .text-rose-800,
+html.dark .text-rose-700 {
+  color: #fda4af !important;
+}
+
+html.dark .text-amber-950,
+html.dark .text-amber-900,
+html.dark .text-amber-800,
+html.dark .text-amber-700 {
+  color: #fcd34d !important;
+}
+
+html.dark .text-indigo-950,
+html.dark .text-indigo-900,
+html.dark .text-indigo-800,
+html.dark .text-indigo-700 {
+  color: #a5b4fc !important;
+}
+
+html.dark .text-sky-900,
+html.dark .text-sky-800,
+html.dark .text-sky-700 {
+  color: #7dd3fc !important;
+}
+
+/* 4. Đường viền & Đường phân cách (Borders & Dividers) */
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-200\/80,
+html.dark .border-slate-200\/90 {
+  border-color: #1e293b !important;
+}
+
+html.dark .border-slate-300 {
+  border-color: #334155 !important;
+}
+
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b !important;
+}
+
+html.dark .border-teal-200,
+html.dark .border-teal-300 {
+  border-color: rgba(45, 212, 191, 0.35) !important;
+}
+
+html.dark .border-emerald-200,
+html.dark .border-emerald-300 {
+  border-color: rgba(52, 211, 153, 0.35) !important;
+}
+
+html.dark .border-rose-200,
+html.dark .border-rose-300 {
+  border-color: rgba(251, 113, 133, 0.35) !important;
+}
+
+html.dark .border-amber-200,
+html.dark .border-amber-300 {
+  border-color: rgba(251, 191, 36, 0.35) !important;
+}
+
+html.dark .border-indigo-200,
+html.dark .border-indigo-300 {
+  border-color: rgba(129, 140, 248, 0.35) !important;
+}
+
+/* 5. Ô nhập liệu, Select & Textarea trong Dark Mode */
+html.dark input:not([type="checkbox"]):not([type="radio"]),
+html.dark select,
+html.dark textarea {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* 6. Tô màu Đáp án Đúng/Sai & Khung Giải thích trong Chế độ Tối (Dark Mode Feedback) */
+html.dark .feedback-option-correct,
+html.dark .feedback-banner-correct,
+html.dark .feedback-block-correct {
+  background-color: rgba(6, 78, 59, 0.42) !important;
+  border-color: rgba(52, 211, 153, 0.48) !important;
+}
+
+html.dark .feedback-option-wrong,
+html.dark .feedback-banner-wrong {
+  background-color: rgba(136, 19, 55, 0.42) !important;
+  border-color: rgba(251, 113, 133, 0.48) !important;
+}
+
+html.dark .feedback-block-explanation {
+  background-color: rgba(120, 53, 15, 0.36) !important;
+  border-color: rgba(251, 191, 36, 0.48) !important;
+}
+

@@ -565,21 +565,25 @@ export async function syncExamWrongQuestionsToFirestore(
 }
 
 /**
- * Tạo mới hoặc cập nhật tài khoản học sinh (dành cho Giáo viên)
+ * Tạo mới hoặc cập nhật tài khoản (Học sinh hoặc Giáo viên Quản trị)
  */
 export async function saveStudentAccount(account: UserAccount): Promise<void> {
   const sanitizedId = account.username.trim().replace(/[^a-zA-Z0-9_-]/g, '');
   if (!sanitizedId) {
-    throw new Error('Mã học sinh chỉ được chứa chữ cái, chữ số, dấu gạch ngang hoặc gạch dưới.');
+    throw new Error('Mã tài khoản chỉ được chứa chữ cái, chữ số, dấu gạch ngang hoặc gạch dưới.');
   }
   const totalSec = Math.max(0, Number(account.totalStudySeconds) || 0);
+  const defaultGroup =
+    account.role === 'teacher'
+      ? 'Tổ Toán - Tin · Trường IGC Tây Ninh'
+      : 'Lớp Certiport GenAI';
   const payload: UserAccount = {
     id: sanitizedId,
     username: sanitizedId,
     password: account.password.trim().slice(0, 128),
     fullName: account.fullName.trim().slice(0, 120),
-    role: account.role,
-    className: (account.className || 'Lớp Certiport GenAI').trim().slice(0, 64),
+    role: account.role === 'teacher' ? 'teacher' : 'student',
+    className: (account.className || defaultGroup).trim().slice(0, 64),
     lastLogin: account.lastLogin || new Date().toISOString(),
     status: account.activeStatus || account.status || 'offline',
     activeStatus: account.activeStatus || account.status || 'offline',
@@ -589,6 +593,7 @@ export async function saveStudentAccount(account: UserAccount): Promise<void> {
     wrongQuestions: account.wrongQuestions ?? [],
     masteredQuestions: account.masteredQuestions ?? [],
     practiceProgress: account.practiceProgress ?? {},
+    ...(account.logoUrl !== undefined ? { logoUrl: account.logoUrl } : {}),
     createdAt: account.createdAt || new Date().toISOString(),
   };
 
@@ -596,6 +601,34 @@ export async function saveStudentAccount(account: UserAccount): Promise<void> {
     await setDoc(doc(db, 'users', sanitizedId), payload, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `users/${sanitizedId}`);
+  }
+}
+
+/**
+ * Lưu hoặc cập nhật Logo Tổ Toán - Tin · Trường IGC Tây Ninh vào tài khoản quản trị gốc (`users/admin`) trên Firestore
+ */
+export async function updateDepartmentLogoInFirestore(logoUrl: string): Promise<void> {
+  const path = `users/${DEFAULT_ADMIN_ACCOUNT.id}`;
+  try {
+    const snap = await getDoc(doc(db, 'users', DEFAULT_ADMIN_ACCOUNT.id));
+    const current: UserAccount = snap.exists()
+      ? (snap.data() as UserAccount)
+      : DEFAULT_ADMIN_ACCOUNT;
+    await setDoc(
+      doc(db, 'users', DEFAULT_ADMIN_ACCOUNT.id),
+      {
+        ...current,
+        id: DEFAULT_ADMIN_ACCOUNT.id,
+        username: current.username || DEFAULT_ADMIN_ACCOUNT.username,
+        password: current.password || DEFAULT_ADMIN_ACCOUNT.password,
+        fullName: current.fullName || DEFAULT_ADMIN_ACCOUNT.fullName,
+        role: 'teacher',
+        logoUrl: logoUrl.trim(),
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 

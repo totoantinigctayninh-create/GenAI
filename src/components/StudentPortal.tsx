@@ -40,6 +40,8 @@ import {
   getUserAnswerBreakdown,
   resolvePracticeSessionPool,
 } from '../utils/scoring';
+import { ThemeToggleButton } from '../context/ThemeContext';
+import { IgcToanTinDefaultEmblem } from './LoginScreen';
 import { MockExamView } from './MockExamView';
 import { QuestionFontScale, QuestionRenderer } from './QuestionRenderer';
 
@@ -57,6 +59,7 @@ interface StudentPortalProps {
     removeOnCorrect?: boolean
   ) => Promise<void>;
   onMarkQuestionMastered: (questionId: string) => Promise<void>;
+  departmentLogoUrl?: string;
 }
 
 type StudentTab = 'dashboard' | 'practice' | 'mistakes' | 'exam' | 'history';
@@ -82,6 +85,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   onToggleBookmark,
   onRecordPracticeCheck,
   onMarkQuestionMastered,
+  departmentLogoUrl = '',
 }) => {
   const [activeTab, setActiveTab] = useState<StudentTab>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -107,8 +111,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [practiceCustomCount, setPracticeCustomCount] = useState<number>(35);
   const [practiceTimeMinutes, setPracticeTimeMinutes] = useState<number>(0); // 0 = Không giới hạn thời gian
   const [practiceShuffle, setPracticeShuffle] = useState<boolean>(true);
-  const [practiceDrawSeed, setPracticeDrawSeed] = useState<number>(0);
   const [onlyBookmarked, setOnlyBookmarked] = useState<boolean>(false);
+
+  // Danh sách ID câu hỏi cố định cho phiên Luyện tập hiện tại (Tuyệt đối KHÔNG tự động xáo trộn lại khi chấm đáp án hay đồng bộ thời gian)
+  const [practiceSessionIds, setPracticeSessionIds] = useState<string[]>([]);
+  const hasInitializedPracticePoolRef = React.useRef<boolean>(false);
 
   // Hộp thoại xuất hiện trước khi vào làm ở Chế độ Luyện tập
   const [isPracticeSetupOpen, setIsPracticeSetupOpen] = useState<boolean>(true);
@@ -118,7 +125,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     useState<boolean>(false);
 
   // Tối ưu hiển thị Giao diện Tập trung (Focus Mode) dùng chung cho Luyện tập & Thi thử
-  const [fontScale, setFontScale] = useState<QuestionFontScale>('large');
+  const [fontScale, setFontScale] = useState<QuestionFontScale>('normal');
   const [isFocusMode, setIsFocusMode] = useState<boolean>(true);
   const [isZenHeaderHidden, setIsZenHeaderHidden] = useState<boolean>(false);
   const [isPracticeNavCollapsed, setIsPracticeNavCollapsed] = useState<boolean>(false);
@@ -127,7 +134,6 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [practiceIndex, setPracticeIndex] = useState<number>(0);
   const [practiceAnswers, setPracticeAnswers] = useState<Record<string, UserAnswer>>({});
   const [practiceCheckedMap, setPracticeCheckedMap] = useState<Record<string, boolean>>({});
-  const [syncBannerText, setSyncBannerText] = useState<string | null>(null);
 
   // ============================================================================
   // 2. STATE CHO KHO CÂU SAI (MISTAKE REVIEW TAB)
@@ -136,7 +142,6 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [mistakeIndex, setMistakeIndex] = useState<number>(0);
   const [mistakeAnswers, setMistakeAnswers] = useState<Record<string, UserAnswer>>({});
   const [mistakeCheckedMap, setMistakeCheckedMap] = useState<Record<string, boolean>>({});
-  const [autoRemoveOnMastery, setAutoRemoveOnMastery] = useState<boolean>(false);
   const [masteredSuccessNote, setMasteredSuccessNote] = useState<string | null>(null);
 
   // ============================================================================
@@ -214,37 +219,106 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     );
   }, [questions, practiceTopic, practiceType, onlyBookmarked, bookmarkedIds]);
 
-  // Rút trích bộ câu hỏi cho phiên Luyện tập theo lựa chọn của Học sinh (Tất cả các câu hoặc Số câu tùy chọn)
-  const practiceDrawResult = useMemo(() => {
-    void practiceDrawSeed;
-    const isAllMode = practiceDrawSize === 'ALL';
-    const requestedCount = isAllMode
-      ? baseFilteredQuestions.length
-      : Math.max(
-          1,
-          parseInt(practiceDrawSize, 10) ||
-            practiceCustomCount ||
-            baseFilteredQuestions.length
-        );
+  // Số câu dự kiến khi đang chọn trong Hộp thoại Thiết lập (Tính toán tĩnh, không gọi Math.random)
+  const setupPreviewQuestionCount = useMemo(() => {
+    if (practiceDrawSize === 'ALL') return baseFilteredQuestions.length;
+    const requested =
+      parseInt(practiceDrawSize, 10) ||
+      practiceCustomCount ||
+      baseFilteredQuestions.length;
+    return Math.min(baseFilteredQuestions.length, Math.max(0, requested));
+  }, [baseFilteredQuestions.length, practiceDrawSize, practiceCustomCount]);
 
-    return resolvePracticeSessionPool(baseFilteredQuestions, {
-      questionCountMode: isAllMode ? 'ALL' : 'CUSTOM',
-      customQuestionCount: requestedCount,
-      timeLimitMinutes: practiceTimeMinutes,
-      shuffleQuestions: practiceShuffle,
-      focusMode: isFocusMode,
-    });
+  // Hàm rút trích danh sách ID câu hỏi cố định cho Phiên Luyện tập (Chỉ gọi khi bấm Bắt đầu hoặc Bốc đề mới)
+  const buildLockedPracticeSessionIds = React.useCallback(
+    (overrides?: {
+      topic?: string;
+      type?: QuestionTypeFilter;
+      bookmarkedOnly?: boolean;
+      drawSize?: string;
+      customCount?: number;
+      shuffle?: boolean;
+    }): string[] => {
+      const nextTopic = overrides?.topic ?? practiceTopic;
+      const nextType = overrides?.type ?? practiceType;
+      const nextBookmarkedOnly = overrides?.bookmarkedOnly ?? onlyBookmarked;
+      const nextDrawSize = overrides?.drawSize ?? practiceDrawSize;
+      const nextCustomCount = overrides?.customCount ?? practiceCustomCount;
+      const nextShuffle = overrides?.shuffle ?? practiceShuffle;
+
+      const pool = filterPracticeQuestions(
+        questions,
+        {
+          topic: nextTopic,
+          questionType: nextType,
+          examSet: 'ALL',
+          onlyBookmarked: nextBookmarkedOnly,
+        },
+        bookmarkedIds
+      );
+
+      const isAllMode = nextDrawSize === 'ALL';
+      const requestedCount = isAllMode
+        ? pool.length
+        : Math.max(
+            1,
+            parseInt(nextDrawSize, 10) || nextCustomCount || pool.length
+          );
+
+      const drawn = resolvePracticeSessionPool(pool, {
+        questionCountMode: isAllMode ? 'ALL' : 'CUSTOM',
+        customQuestionCount: requestedCount,
+        timeLimitMinutes: practiceTimeMinutes,
+        shuffleQuestions: nextShuffle,
+        focusMode: isFocusMode,
+      });
+
+      return drawn.questions.map((q) => q.id);
+    },
+    [
+      questions,
+      practiceTopic,
+      practiceType,
+      onlyBookmarked,
+      bookmarkedIds,
+      practiceDrawSize,
+      practiceCustomCount,
+      practiceTimeMinutes,
+      practiceShuffle,
+      isFocusMode,
+    ]
+  );
+
+  // Chỉ khởi tạo danh sách câu hỏi mặc định khi chưa có danh sách trong phiên
+  useEffect(() => {
+    if (!isPracticeSessionActive && questions.length > 0 && practiceSessionIds.length === 0) {
+      hasInitializedPracticePoolRef.current = true;
+      setPracticeSessionIds(buildLockedPracticeSessionIds());
+    }
   }, [
-    baseFilteredQuestions,
-    practiceDrawSize,
-    practiceCustomCount,
-    practiceTimeMinutes,
-    practiceShuffle,
-    isFocusMode,
-    practiceDrawSeed,
+    isPracticeSessionActive,
+    questions.length,
+    practiceSessionIds.length,
+    buildLockedPracticeSessionIds,
   ]);
 
-  const filteredPracticeQuestions = practiceDrawResult.questions;
+  const questionsByIdMap = useMemo(
+    () => new Map<string, Question>(questions.map((q) => [q.id, q])),
+    [questions]
+  );
+
+  // Danh sách câu hỏi của Phiên Luyện tập được giữ cố định thứ tự 100% trong suốt quá trình làm bài
+  const filteredPracticeQuestions = useMemo(() => {
+    if (practiceSessionIds.length > 0) {
+      const lockedList = practiceSessionIds
+        .map((id) => questionsByIdMap.get(id))
+        .filter((q): q is Question => Boolean(q));
+      if (lockedList.length > 0) {
+        return lockedList;
+      }
+    }
+    return baseFilteredQuestions;
+  }, [practiceSessionIds, questionsByIdMap, baseFilteredQuestions]);
 
   const activePracticeQuestion =
     filteredPracticeQuestions[practiceIndex] ?? filteredPracticeQuestions[0] ?? null;
@@ -284,14 +358,29 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     return { checkedCount, correctCount, progressPercent };
   }, [filteredPracticeQuestions, practiceCheckedMap, practiceAnswers]);
 
-  // Bắt đầu phiên luyện tập từ Hộp thoại Cấu hình
+  // Bắt đầu phiên luyện tập từ Hộp thoại Cấu hình — Khóa cố định danh sách câu hỏi và tự động ẩn Header
   const handleStartPracticeSession = () => {
-    setPracticeDrawSeed((s) => s + 1);
+    const lockedIds = buildLockedPracticeSessionIds();
+    hasInitializedPracticePoolRef.current = true;
+    setPracticeSessionIds(lockedIds);
     setPracticeIndex(0);
     setPracticeElapsedSeconds(0);
     setIsPracticeSetupOpen(false);
     setIsPracticeSessionActive(true);
     setShowFilterDrawerInPractice(false);
+    if (isFocusMode) {
+      setIsZenHeaderHidden(true);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Thoát chế độ luyện tập quay về trang Tổng quan và hiện lại thanh Header
+  const handleExitPracticeSession = () => {
+    setIsPracticeSessionActive(false);
+    setIsPracticeSetupOpen(false);
+    setIsZenHeaderHidden(false);
+    setShowFilterDrawerInPractice(false);
+    setActiveTab('dashboard');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -342,7 +431,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const activeMistakeQuestion =
     wrongQuestionsList[mistakeIndex] ?? wrongQuestionsList[0] ?? null;
 
-  // Xử lý bấm "Kiểm tra đáp án" trong Chế độ Luyện tập
+  // Xử lý bấm "Kiểm tra đáp án" trong Chế độ Luyện tập (Không hiện thông báo lưu Firebase để tránh xao nhãng)
   const handleCheckPracticeAnswer = async (question: Question) => {
     const ans = practiceAnswers[question.id];
     const isCorrect = evaluateQuestion(question, ans);
@@ -353,19 +442,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     }));
 
     await onRecordPracticeCheck(question.id, isCorrect, false);
-
-    if (!isCorrect) {
-      setSyncBannerText(
-        `Câu ${question.id.toUpperCase()} chưa chính xác — Đã tự động lưu vào "Kho câu sai" trên Firestore để bạn ôn lại.`
-      );
-    } else {
-      setSyncBannerText(
-        `Chính xác 100%! Đã đồng bộ tiến độ hoàn thành câu ${question.id.toUpperCase()} lên Firestore.`
-      );
-    }
   };
 
-  // Xử lý bấm "Kiểm tra đáp án" trong Kho câu sai
+  // Xử lý bấm "Kiểm tra đáp án" trong Kho câu sai (Giữ nguyên câu hiện tại để đọc giải thích, chỉ chuyển khi người dùng bấm)
   const handleCheckMistakeAnswer = async (question: Question) => {
     const ans = mistakeAnswers[question.id];
     const isCorrect = evaluateQuestion(question, ans);
@@ -375,14 +454,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       [question.id]: true,
     }));
 
-    await onRecordPracticeCheck(question.id, isCorrect, autoRemoveOnMastery);
+    await onRecordPracticeCheck(question.id, isCorrect, false);
 
-    if (isCorrect && autoRemoveOnMastery) {
-      setMasteredSuccessNote(
-        `Chúc mừng! Bạn đã trả lời đúng 100% câu ${question.id.toUpperCase()} và hệ thống đã tự động chuyển sang trạng thái "Đã nắm vững".`
-      );
-      setMistakeIndex(0);
-    } else if (isCorrect) {
+    if (isCorrect) {
       setMasteredSuccessNote(
         `Chính xác tuyệt đối! Bạn có thể bấm nút "Đã nắm vững (Xóa khỏi kho câu sai)" bên dưới để hoàn tất khắc phục câu này.`
       );
@@ -395,7 +469,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const handleConfirmMastered = async (questionId: string) => {
     await onMarkQuestionMastered(questionId);
     setMasteredSuccessNote(
-      `Đã xóa câu ${questionId.toUpperCase()} khỏi Kho câu sai và cập nhật trạng thái "Đã nắm vững" lên Firestore!`
+      `Đã xóa câu ${questionId.toUpperCase()} khỏi Kho câu sai!`
     );
     setMistakeIndex(0);
   };
@@ -416,31 +490,247 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Top Navigation Bar theo chuẩn 3-Zone Contract (Tự động ẩn nếu bật Chế độ Tập trung Tối đa) */}
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      {/* LEFT SIDEBAR CHO DESKTOP (Tự động ẩn nếu bật Chế độ Tập trung Tối đa / Ẩn sidebar) */}
       {!isZenHeaderHidden && (
-        <header className="flex items-center justify-between gap-6 px-6 py-3.5 bg-white border-b border-slate-200 sticky top-0 z-20">
-          {/* Zone 1: Brand Wordmark */}
-          <a
-            href="#student-home"
-            onClick={(e) => {
-              e.preventDefault();
-              setActiveTab('dashboard');
-            }}
-            className="text-lg font-bold tracking-tight text-teal-800 whitespace-nowrap shrink-0"
-          >
-            Certiport GenAI Prep
-          </a>
+        <aside
+          data-testid="student-sidebar"
+          aria-label="Thanh điều hướng Học sinh"
+          className="hidden md:flex md:flex-col md:w-60 lg:w-64 md:shrink-0 bg-white border-r border-slate-200 md:sticky md:top-0 md:h-screen z-30 select-none"
+        >
+          {/* Zone 1: Brand Wordmark & Logo Tổ Toán - Tin IGC Tây Ninh */}
+          <div className="px-4 py-4 border-b border-slate-200 flex items-center justify-between gap-2">
+            <a
+              href="#student-home"
+              onClick={(e) => {
+                e.preventDefault();
+                setActiveTab('dashboard');
+              }}
+              className="flex items-center gap-2.5 group min-w-0"
+            >
+              <div className="keep-light w-10 h-10 rounded-full bg-white border border-teal-200 flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
+                {departmentLogoUrl ? (
+                  <img
+                    src={departmentLogoUrl}
+                    alt="Logo Tổ Toán - Tin"
+                    className="w-full h-full object-contain rounded-full p-0.5"
+                  />
+                ) : (
+                  <IgcToanTinDefaultEmblem className="w-8 h-8" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-extrabold tracking-tight text-teal-900 truncate">
+                  Tổ Toán - Tin · IGC
+                </div>
+                <div className="text-[11px] font-medium text-slate-500 truncate">
+                  Hệ thống Ôn Gen AI
+                </div>
+              </div>
+            </a>
+          </div>
 
-          {/* Zone 2: Top-level Navigation Links */}
-          <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+          {/* Thông tin tóm tắt Thí sinh trong Sidebar */}
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/70 space-y-2">
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-slate-900 truncate">
+                {currentUser.fullName}
+              </div>
+              <div className="text-[11px] text-slate-500 truncate">
+                Mã HS:{' '}
+                <strong className="font-mono text-teal-800">
+                  {currentUser.username}
+                </strong>{' '}
+                · {currentUser.className || 'Lớp GenAI'}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 pt-0.5 tabular-nums">
+              <div className="px-2 py-1 rounded-md bg-white border border-slate-200/80">
+                <span className="text-[10px] text-slate-400 block">Ôn tập</span>
+                <span className="font-mono font-bold text-xs text-teal-800">
+                  {formatStudyDuration(totalCombinedStudySeconds)}
+                </span>
+              </div>
+              <div className="px-2 py-1 rounded-md bg-white border border-slate-200/80">
+                <span className="text-[10px] text-slate-400 block">Đã nhớ</span>
+                <span className="font-mono font-bold text-xs text-emerald-700">
+                  {masteredQuestionIds.length} câu
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Zone 2: Vertical Navigation Menu */}
+          <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
+            <div className="px-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Menu Học tập
+            </div>
+
+            <button
+              type="button"
+              data-testid="nav-tab-dashboard"
+              onClick={() => setActiveTab('dashboard')}
+              className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeTab === 'dashboard'
+                  ? 'bg-teal-700 text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2.5 truncate">
+                <Target className="w-4 h-4 shrink-0" />
+                <span className="truncate">Tổng quan</span>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="nav-tab-practice"
+              onClick={handleSelectPracticeTab}
+              className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeTab === 'practice'
+                  ? 'bg-teal-700 text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2.5 truncate">
+                <PlayCircle className="w-4 h-4 shrink-0" />
+                <span className="truncate">Chế độ Luyện tập</span>
+              </span>
+              <span
+                className={`px-1.5 py-0.5 text-[11px] font-mono font-bold rounded-md tabular-nums ${
+                  activeTab === 'practice'
+                    ? 'bg-teal-800 text-teal-100'
+                    : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {questions.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="nav-tab-mistakes"
+              onClick={() => setActiveTab('mistakes')}
+              className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeTab === 'mistakes'
+                  ? 'bg-rose-600 text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2.5 truncate">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span className="truncate">Kho câu sai</span>
+              </span>
+              <span
+                className={`px-1.5 py-0.5 text-[11px] font-mono font-bold rounded-md tabular-nums ${
+                  activeTab === 'mistakes'
+                    ? 'bg-rose-700 text-white'
+                    : wrongQuestionIds.length > 0
+                      ? 'bg-rose-100 text-rose-800'
+                      : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {wrongQuestionIds.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="nav-tab-exam"
+              onClick={() => setActiveTab('exam')}
+              className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeTab === 'exam'
+                  ? 'bg-teal-700 text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2.5 truncate">
+                <Award className="w-4 h-4 shrink-0" />
+                <span className="truncate">Thi thử (Mock Exam)</span>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="nav-tab-history"
+              onClick={() => setActiveTab('history')}
+              className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                activeTab === 'history'
+                  ? 'bg-teal-700 text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2.5 truncate">
+                <History className="w-4 h-4 shrink-0" />
+                <span className="truncate">Lịch sử phòng thi</span>
+              </span>
+              <span
+                className={`px-1.5 py-0.5 text-[11px] font-mono font-bold rounded-md tabular-nums ${
+                  activeTab === 'history'
+                    ? 'bg-teal-800 text-teal-100'
+                    : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {myAttempts.length}
+              </span>
+            </button>
+          </nav>
+
+          {/* Zone 3: Sidebar Footer Actions (Dark Mode + Logout) */}
+          <div className="p-3 border-t border-slate-200 space-y-2 bg-slate-50/40">
+            <ThemeToggleButton
+              variant="sidebar"
+              testId="student-sidebar-theme-toggle"
+            />
+            <button
+              type="button"
+              onClick={onLogout}
+              className="w-full px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 border border-transparent rounded-xl transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Đăng xuất ({currentUser.username})</span>
+            </button>
+          </div>
+        </aside>
+      )}
+
+      {/* Thanh điều hướng rút gọn trên Mobile (< 768px) */}
+      {!isZenHeaderHidden && (
+        <div className="md:hidden bg-white border-b border-slate-200 sticky top-0 z-30">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100">
+            <a
+              href="#student-home"
+              onClick={(e) => {
+                e.preventDefault();
+                setActiveTab('dashboard');
+              }}
+              className="text-sm font-extrabold tracking-tight text-teal-800"
+            >
+              Tổ Toán - Tin · IGC
+            </a>
+            <div className="flex items-center gap-2">
+              <ThemeToggleButton
+                variant="compact"
+                testId="student-mobile-theme-toggle"
+              />
+              <button
+                type="button"
+                onClick={onLogout}
+                className="px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+              >
+                <LogOut className="w-3 h-3" />
+                <span>Đăng xuất</span>
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 px-3 py-1.5 overflow-x-auto">
             <button
               type="button"
               onClick={() => setActiveTab('dashboard')}
-              className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
                 activeTab === 'dashboard'
-                  ? 'border-teal-700 text-teal-800 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
+                  ? 'bg-teal-700 text-white'
+                  : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
               Tổng quan
@@ -448,10 +738,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             <button
               type="button"
               onClick={handleSelectPracticeTab}
-              className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
                 activeTab === 'practice'
-                  ? 'border-teal-700 text-teal-800 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
+                  ? 'bg-teal-700 text-white'
+                  : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
               Chế độ Luyện tập
@@ -459,126 +749,44 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('mistakes')}
-              className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 inline-flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
                 activeTab === 'mistakes'
-                  ? 'border-rose-600 text-rose-700 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
+                  ? 'bg-rose-600 text-white'
+                  : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
-              <span>Kho câu sai</span>
-              <span
-                className={`px-1.5 py-0.5 text-xs font-mono font-bold rounded-md tabular-nums ${
-                  wrongQuestionIds.length > 0
-                    ? 'bg-rose-100 text-rose-800'
-                    : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                {wrongQuestionIds.length}
-              </span>
+              Kho câu sai ({wrongQuestionIds.length})
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('exam')}
-              className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
                 activeTab === 'exam'
-                  ? 'border-teal-700 text-teal-800 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
+                  ? 'bg-teal-700 text-white'
+                  : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
-              Chế độ Thi thử (Mock Exam)
+              Thi thử (Mock Exam)
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('history')}
-              className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 cursor-pointer ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
                 activeTab === 'history'
-                  ? 'border-teal-700 text-teal-800 font-semibold'
-                  : 'border-transparent hover:text-slate-900'
+                  ? 'bg-teal-700 text-white'
+                  : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
               Lịch sử ({myAttempts.length})
             </button>
-          </nav>
-
-          {/* Zone 3: 1 Primary Action */}
-          <div className="flex items-center gap-3 shrink-0">
-            <button
-              type="button"
-              onClick={onLogout}
-              className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Đăng xuất ({currentUser.username})</span>
-            </button>
           </div>
-        </header>
-      )}
-
-      {/* Thanh điều hướng phụ cho màn hình nhỏ */}
-      {!isZenHeaderHidden && (
-        <div className="md:hidden flex items-center gap-1 px-4 py-2 bg-white border-b border-slate-200 overflow-x-auto">
-          <button
-            type="button"
-            onClick={() => setActiveTab('dashboard')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-              activeTab === 'dashboard'
-                ? 'bg-teal-700 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            Tổng quan
-          </button>
-          <button
-            type="button"
-            onClick={handleSelectPracticeTab}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-              activeTab === 'practice'
-                ? 'bg-teal-700 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            Chế độ Luyện tập
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('mistakes')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-              activeTab === 'mistakes'
-                ? 'bg-rose-600 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            Kho câu sai ({wrongQuestionIds.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('exam')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-              activeTab === 'exam'
-                ? 'bg-teal-700 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            Thi thử (Mock Exam)
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('history')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-              activeTab === 'history'
-                ? 'bg-teal-700 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            Lịch sử ({myAttempts.length})
-          </button>
         </div>
       )}
 
       {/* Main Workspace */}
       <main
-        className={`flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 ${
-          isInFocusWorkspace ? 'py-3 space-y-4' : 'py-6 space-y-6'
+        className={`flex-1 min-w-0 max-w-7xl w-full mx-auto px-3 sm:px-6 ${
+          isInFocusWorkspace ? 'py-2 space-y-2.5' : 'py-5 space-y-5'
         }`}
       >
         {/* Khung thông tin Học sinh — Tự động ẩn khi đang trong Phiên Ôn thi / Thi thử Tập trung */}
@@ -628,7 +836,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             TAB 1: CHẾ ĐỘ LUYỆN TẬP (CÓ HỘP THOẠI CHỌN SỐ CÂU & THỜI GIAN TRƯỚC KHI VÀO LÀM + GIAO DIỆN TẬP TRUNG)
            ===================================================================== */}
         {activeTab === 'practice' && (
-          <div data-testid="practice-focus-workspace" className="space-y-4">
+          <div data-testid="practice-focus-workspace" className="space-y-2.5">
             {/* HỘP THOẠI CẤU HÌNH PHIÊN LUYỆN TẬP TRƯỚC KHI VÀO LÀM */}
             {isPracticeSetupOpen && (
               <div
@@ -655,15 +863,26 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         Bạn có thể chọn <strong>làm tất cả các câu ({baseFilteredQuestions.length} câu)</strong> và <strong>không giới hạn thời gian</strong>, hoặc giới hạn số câu và đồng hồ đếm ngược để rèn tốc độ.
                       </p>
                     </div>
-                    {isPracticeSessionActive && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      {isPracticeSessionActive && (
+                        <button
+                          type="button"
+                          onClick={() => setIsPracticeSetupOpen(false)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700 cursor-pointer"
+                        >
+                          Đóng
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => setIsPracticeSetupOpen(false)}
-                        className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700 cursor-pointer shrink-0"
+                        data-testid="exit-practice-from-setup-btn"
+                        onClick={handleExitPracticeSession}
+                        className="px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-xs font-bold text-rose-700 inline-flex items-center gap-1 cursor-pointer"
                       >
-                        Đóng
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Thoát luyện tập</span>
                       </button>
-                    )}
+                    </div>
                   </div>
 
                   {/* Bước 1: Chọn Số lượng câu hỏi muốn làm */}
@@ -918,7 +1137,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     <div className="text-xs text-slate-600 tabular-nums">
                       Sẵn sàng:{' '}
                       <strong className="text-teal-800 font-mono">
-                        {filteredPracticeQuestions.length} câu hỏi
+                        {setupPreviewQuestionCount} câu hỏi
                       </strong>{' '}
                       · Thời gian:{' '}
                       <strong className="text-teal-800">
@@ -931,13 +1150,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     <button
                       type="button"
                       data-testid="start-practice-session-btn"
-                      disabled={filteredPracticeQuestions.length === 0}
+                      disabled={setupPreviewQuestionCount === 0}
                       onClick={handleStartPracticeSession}
                       className="px-6 py-3 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:bg-slate-300 text-white text-sm font-bold inline-flex items-center gap-2 shadow-sm transition-all cursor-pointer"
                     >
                       <PlayCircle className="w-5 h-5" />
                       <span>
-                        Bắt đầu Vào Làm Bài ({filteredPracticeQuestions.length} câu)
+                        Bắt đầu Vào Làm Bài ({setupPreviewQuestionCount} câu)
                       </span>
                     </button>
                   </div>
@@ -945,38 +1164,36 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               </div>
             )}
 
-            {/* THANH ĐIỀU KHIỂN ÔN THI TẬP TRUNG (STICKY FOCUS COMMAND BAR) */}
+            {/* THANH ĐIỀU KHIỂN ÔN THI TẬP TRUNG SIÊU GỌN (1 DÒNG ~38PX) */}
             <section
               aria-label="Thanh điều khiển Chế độ Luyện tập Tập trung"
               data-testid="practice-focus-command-bar"
-              className={`sticky ${
-                isZenHeaderHidden ? 'top-2' : 'top-[57px]'
-              } z-20 bg-white/95 backdrop-blur-xs border border-slate-200 rounded-xl p-3.5 sm:px-5 shadow-xs space-y-2.5`}
+              className="sticky top-1.5 z-20 bg-white/95 backdrop-blur-xs border border-slate-200 rounded-lg px-3 py-1.5 shadow-2xs space-y-1.5"
             >
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <span className="px-3 py-1.5 rounded-lg bg-teal-800 text-white text-xs font-bold tracking-wide tabular-nums">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2.5 py-1 rounded-md bg-teal-800 text-white text-[11px] font-bold tracking-wide tabular-nums">
                     LUYỆN TẬP · CÂU {Math.min(practiceIndex + 1, filteredPracticeQuestions.length)}/{filteredPracticeQuestions.length}
                   </span>
 
-                  <div className="text-xs sm:text-sm font-medium text-slate-700 tabular-nums">
-                    Đã kiểm tra:{' '}
+                  <span className="text-xs font-medium text-slate-700 tabular-nums">
+                    Đã chấm:{' '}
                     <strong className="font-mono text-teal-800">
                       {practiceSessionStats.checkedCount}/{filteredPracticeQuestions.length}
                     </strong>{' '}
-                    · Đúng:{' '}
+                    ({practiceSessionStats.progressPercent}%) · Đúng:{' '}
                     <strong className="font-mono text-emerald-700">
                       {practiceSessionStats.correctCount}
                     </strong>
-                  </div>
+                  </span>
                 </div>
 
-                {/* Các nút Công cụ Tập trung & Quan sát (Đồng hồ, Cỡ chữ A-/A/A+, Mở rộng khung đề, Đổi cấu hình) */}
-                <div className="flex flex-wrap items-center gap-2">
+                {/* Các nút Công cụ Tập trung & Quan sát gọn trên 1 dòng */}
+                <div className="flex flex-wrap items-center gap-1.5">
                   {/* Đồng hồ Thời gian (Không giới hạn hoặc Đếm ngược) */}
                   <div
                     data-testid="practice-session-timer"
-                    className={`px-3 py-1.5 rounded-lg font-mono text-xs sm:text-sm font-bold tabular-nums inline-flex items-center gap-1.5 ${
+                    className={`px-2 py-1 rounded-md font-mono text-xs font-bold tabular-nums inline-flex items-center gap-1 ${
                       practiceTimerStatus.isExpired
                         ? 'bg-rose-600 text-white'
                         : practiceTimerStatus.isWarning
@@ -984,19 +1201,19 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                           : 'bg-slate-900 text-white'
                     }`}
                   >
-                    <Clock className="w-3.5 h-3.5 shrink-0" />
+                    <Clock className="w-3 h-3 shrink-0" />
                     <span>
                       {practiceTimerStatus.isUnlimited
-                        ? `∞ Không giới hạn · ${practiceTimerStatus.displayClock}`
+                        ? `∞ Tự do · ${practiceTimerStatus.displayClock}`
                         : practiceTimerStatus.isExpired
                           ? 'Hết giờ! (00:00)'
-                          : `Còn lại: ${practiceTimerStatus.displayClock}`}
+                          : `Còn: ${practiceTimerStatus.displayClock}`}
                     </span>
                   </div>
 
-                  {/* Bộ chỉnh cỡ chữ A- / A / A+ giúp dễ quan sát */}
+                  {/* Bộ chỉnh cỡ chữ A- / A / A+ */}
                   <div
-                    className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs"
+                    className="inline-flex items-center rounded-md border border-slate-200 bg-slate-100 p-0.5 text-[11px]"
                     role="group"
                     aria-label="Chỉnh cỡ chữ câu hỏi"
                   >
@@ -1004,7 +1221,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       type="button"
                       data-testid="font-scale-btn-normal"
                       onClick={() => setFontScale('normal')}
-                      className={`px-2 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                      className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
                         fontScale === 'normal'
                           ? 'bg-white text-teal-800 shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
@@ -1016,7 +1233,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       type="button"
                       data-testid="font-scale-btn-large"
                       onClick={() => setFontScale('large')}
-                      className={`px-2 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                      className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
                         fontScale === 'large'
                           ? 'bg-white text-teal-800 shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
@@ -1028,7 +1245,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       type="button"
                       data-testid="font-scale-btn-xlarge"
                       onClick={() => setFontScale('xlarge')}
-                      className={`px-2 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                      className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
                         fontScale === 'xlarge'
                           ? 'bg-white text-teal-800 shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
@@ -1038,38 +1255,44 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     </button>
                   </div>
 
+                  {/* Nút Chuyển đổi Sáng/Tối ngay trong phiên Luyện tập Tập trung */}
+                  <ThemeToggleButton
+                    variant="compact"
+                    testId="practice-zen-theme-toggle"
+                  />
+
                   {/* Nút Mở rộng khung đề (Ẩn/Hiện cột danh sách câu hỏi) */}
                   <button
                     type="button"
                     data-testid="toggle-navigator-sidebar-btn"
                     onClick={() => setIsPracticeNavCollapsed((prev) => !prev)}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                    className="px-2 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
                   >
                     {isPracticeNavCollapsed ? (
                       <>
-                        <Minimize2 className="w-3.5 h-3.5" />
-                        <span>Hiện bảng số câu</span>
+                        <Minimize2 className="w-3 h-3" />
+                        <span>Hiện bảng số</span>
                       </>
                     ) : (
                       <>
-                        <Maximize2 className="w-3.5 h-3.5" />
-                        <span>Mở rộng khung đề</span>
+                        <Maximize2 className="w-3 h-3" />
+                        <span>Mở rộng đề</span>
                       </>
                     )}
                   </button>
 
-                  {/* Nút Ẩn/Hiện thanh menu trên cùng để Tập trung 100% */}
+                  {/* Nút Ẩn/Hiện Sidebar bên trái để Tập trung 100% */}
                   <button
                     type="button"
                     data-testid="toggle-zen-header-btn"
                     onClick={() => setIsZenHeaderHidden((prev) => !prev)}
-                    className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+                    className={`px-2 py-1 rounded-md border text-[11px] font-semibold transition-colors cursor-pointer ${
                       isZenHeaderHidden
                         ? 'border-teal-600 bg-teal-50 text-teal-900'
                         : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                     }`}
                   >
-                    {isZenHeaderHidden ? 'Hiện menu trên' : 'Ẩn menu trên'}
+                    {isZenHeaderHidden ? 'Hiện sidebar' : 'Ẩn sidebar'}
                   </button>
 
                   {/* Nút Mở lại Hộp thoại Chọn Số câu & Thời gian */}
@@ -1077,35 +1300,38 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     type="button"
                     data-testid="open-practice-setup-btn"
                     onClick={() => setIsPracticeSetupOpen(true)}
-                    className="px-3 py-1.5 rounded-lg border border-teal-600 bg-teal-50/80 hover:bg-teal-100 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
+                    className="px-2 py-1 rounded-md border border-teal-600 bg-teal-50/80 hover:bg-teal-100 text-[11px] font-bold text-teal-900 inline-flex items-center gap-1 cursor-pointer"
                   >
-                    <Settings2 className="w-3.5 h-3.5 text-teal-700" />
-                    <span>Chọn Số câu & Thời gian</span>
+                    <Settings2 className="w-3 h-3 text-teal-700" />
+                    <span>Cấu hình đề</span>
                   </button>
 
                   {/* Nút bật/tắt nhanh bộ lọc phụ */}
                   <button
                     type="button"
                     onClick={() => setShowFilterDrawerInPractice((prev) => !prev)}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                    className="px-2 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
                   >
-                    <Filter className="w-3.5 h-3.5" />
+                    <Filter className="w-3 h-3" />
                     <span>Bộ lọc</span>
+                  </button>
+
+                  {/* Nút Thoát chế độ luyện tập */}
+                  <button
+                    type="button"
+                    data-testid="exit-practice-session-btn"
+                    onClick={handleExitPracticeSession}
+                    className="px-2.5 py-1 rounded-md border border-rose-300 bg-rose-50 hover:bg-rose-600 hover:text-white hover:border-rose-600 text-[11px] font-bold text-rose-700 inline-flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <LogOut className="w-3 h-3" />
+                    <span>Thoát luyện tập</span>
                   </button>
                 </div>
               </div>
 
-              {/* Thanh tiến độ trực quan */}
-              <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-teal-600 transition-all duration-200 rounded-full"
-                  style={{ width: `${practiceSessionStats.progressPercent}%` }}
-                />
-              </div>
-
               {/* Ngăn kéo Bộ lọc nhanh (chỉ mở khi học sinh bấm nút "Bộ lọc") */}
               {showFilterDrawerInPractice && (
-                <div className="pt-3 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="pt-2.5 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-2.5">
                   <div>
                     <label
                       htmlFor="practice-topic-select"
@@ -1117,10 +1343,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       id="practice-topic-select"
                       value={practiceTopic}
                       onChange={(e) => {
-                        setPracticeTopic(e.target.value);
+                        const nextTopic = e.target.value;
+                        setPracticeTopic(nextTopic);
+                        setPracticeSessionIds(
+                          buildLockedPracticeSessionIds({ topic: nextTopic })
+                        );
                         setPracticeIndex(0);
                       }}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-900"
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-900"
                     >
                       <option value="ALL">Tất cả 4 chuyên đề kiến thức</option>
                       {CERTIPORT_TOPICS.map((t) => (
@@ -1142,10 +1372,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       id="practice-type-select"
                       value={practiceType}
                       onChange={(e) => {
-                        setPracticeType(e.target.value as QuestionTypeFilter);
+                        const nextType = e.target.value as QuestionTypeFilter;
+                        setPracticeType(nextType);
+                        setPracticeSessionIds(
+                          buildLockedPracticeSessionIds({ type: nextType })
+                        );
                         setPracticeIndex(0);
                       }}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-900"
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-900"
                     >
                       {QUESTION_FILTER_OPTIONS.map((opt) => (
                         <option key={opt.value} value={opt.value}>
@@ -1160,10 +1394,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       type="button"
                       data-testid="redraw-proportional-practice-btn"
                       onClick={() => {
-                        setPracticeDrawSeed((s) => s + 1);
+                        setPracticeSessionIds(buildLockedPracticeSessionIds());
                         setPracticeIndex(0);
                       }}
-                      className="px-3 py-2 rounded-lg border border-teal-600 bg-teal-50 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg border border-teal-600 bg-teal-50 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
                     >
                       <Shuffle className="w-3.5 h-3.5" />
                       <span>Bốc đề mới</span>
@@ -1172,10 +1406,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        setOnlyBookmarked((prev) => !prev);
+                        const nextBookmarked = !onlyBookmarked;
+                        setOnlyBookmarked(nextBookmarked);
+                        setPracticeSessionIds(
+                          buildLockedPracticeSessionIds({
+                            bookmarkedOnly: nextBookmarked,
+                          })
+                        );
                         setPracticeIndex(0);
                       }}
-                      className={`px-3 py-2 rounded-lg border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer ${
                         onlyBookmarked
                           ? 'border-amber-500 bg-amber-50 text-amber-900'
                           : 'border-slate-300 bg-white text-slate-700'
@@ -1185,19 +1425,6 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       <span>Bookmark ({bookmarkedIds.length})</span>
                     </button>
                   </div>
-                </div>
-              )}
-
-              {syncBannerText && (
-                <div className="px-3.5 py-2 rounded-lg bg-sky-50 border border-sky-200 text-xs font-medium text-teal-900 flex items-center justify-between gap-2">
-                  <span>{syncBannerText}</span>
-                  <button
-                    type="button"
-                    onClick={() => setSyncBannerText(null)}
-                    className="text-slate-500 hover:text-slate-800 font-semibold"
-                  >
-                    Đóng
-                  </button>
                 </div>
               )}
             </section>
@@ -1213,8 +1440,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     setPracticeTopic('ALL');
                     setPracticeType('ALL');
                     setPracticeDrawSize('ALL');
-                    setPracticeDrawSeed(0);
                     setOnlyBookmarked(false);
+                    setPracticeSessionIds(
+                      buildLockedPracticeSessionIds({
+                        topic: 'ALL',
+                        type: 'ALL',
+                        drawSize: 'ALL',
+                        bookmarkedOnly: false,
+                      })
+                    );
                     setPracticeIndex(0);
                   }}
                   className="px-4 py-2 text-xs font-semibold bg-teal-700 text-white rounded-lg cursor-pointer"
@@ -1223,13 +1457,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              <div className="flex flex-col lg:flex-row gap-3 items-start">
                 <div
                   className={`${
                     isPracticeNavCollapsed
-                      ? 'lg:col-span-12 max-w-5xl w-full mx-auto'
-                      : 'lg:col-span-8'
-                  } space-y-4`}
+                      ? 'w-full max-w-5xl mx-auto'
+                      : 'flex-1 min-w-0 w-full'
+                  } space-y-2.5`}
                 >
                   {activePracticeQuestion && (
                     <>
@@ -1256,15 +1490,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         fontScale={fontScale}
                       />
 
-                      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+                      <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2 flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
                             disabled={practiceIndex === 0}
                             onClick={() => setPracticeIndex((i) => Math.max(0, i - 1))}
-                            className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs sm:text-sm font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
                           >
-                            <ChevronLeft className="w-4 h-4" /> Câu trước (←)
+                            <ChevronLeft className="w-3.5 h-3.5" /> Câu trước (←)
                           </button>
 
                           <button
@@ -1275,13 +1509,13 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 Math.min(filteredPracticeQuestions.length - 1, i + 1)
                               )
                             }
-                            className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs sm:text-sm font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
                           >
-                            Câu tiếp theo (→) <ChevronRight className="w-4 h-4" />
+                            Câu tiếp theo (→) <ChevronRight className="w-3.5 h-3.5" />
                           </button>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
                             onClick={() => {
@@ -1295,7 +1529,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 [activePracticeQuestion.id]: false,
                               }));
                             }}
-                            className="px-3.5 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer"
+                            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
                             <span>Làm lại câu này</span>
@@ -1303,8 +1537,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
                           <button
                             type="button"
+                            data-testid="check-practice-answer-btn"
                             onClick={() => handleCheckPracticeAnswer(activePracticeQuestion)}
-                            className="px-5 py-2.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-bold transition-colors inline-flex items-center gap-2 shadow-xs cursor-pointer"
+                            className="px-4 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-bold transition-colors inline-flex items-center gap-1.5 shadow-2xs cursor-pointer"
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             <span>Kiểm tra đáp án</span>
@@ -1315,20 +1550,34 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   )}
                 </div>
 
+                {/* BẢNG CÂU HỎI SIÊU GỌN (CHỈ CHUYỂN CÂU KHI BẤM CHỌN) */}
                 {!isPracticeNavCollapsed && (
-                  <aside className="lg:col-span-4 bg-white border border-slate-200 rounded-xl p-5 space-y-4 sticky top-28">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <h3 className="text-sm font-bold text-slate-900">
-                          Bảng Câu hỏi ({filteredPracticeQuestions.length} câu)
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Dùng phím ← / → hoặc bấm số câu để chuyển nhanh.
-                        </p>
-                      </div>
+                  <aside
+                    data-testid="practice-question-navigator"
+                    className="w-full lg:w-56 xl:w-60 shrink-0 bg-white border border-slate-200 rounded-xl p-2.5 space-y-2 sticky top-12"
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <h3 className="text-[11px] font-bold text-slate-900">
+                        Bảng câu hỏi ({filteredPracticeQuestions.length})
+                      </h3>
+                      <span className="text-[10px] text-slate-500">
+                        Bấm số để chuyển
+                      </span>
                     </div>
 
-                    <div className="grid grid-cols-5 gap-2 max-h-[380px] overflow-y-auto pr-1">
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-600 px-1.5 py-1 rounded bg-slate-50 border border-slate-100">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-xs bg-emerald-600" /> Đúng
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-xs bg-rose-500" /> Sai
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-xs bg-white border border-slate-300" /> Chưa chấm
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-6 gap-1 p-1 max-h-[260px] overflow-y-auto">
                       {filteredPracticeQuestions.map((q, idx) => {
                         const isCurrent = idx === practiceIndex;
                         const isBookmarked = bookmarkedIds.includes(q.id);
@@ -1341,30 +1590,33 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                           'border-slate-200 bg-slate-50 text-slate-700 hover:border-teal-600';
                         if (checkedHere) {
                           styleClass = localCorrect
-                            ? 'border-emerald-600 bg-emerald-50 text-emerald-900 font-bold'
-                            : 'border-rose-500 bg-rose-50 text-rose-900 font-bold';
+                            ? 'border-emerald-700 bg-emerald-600 text-white font-bold'
+                            : 'border-rose-600 bg-rose-500 text-white font-bold';
                         } else if (savedStat) {
                           styleClass = savedStat.isCorrect
-                            ? 'border-emerald-300 bg-emerald-50/50 text-emerald-900'
-                            : 'border-rose-300 bg-rose-50/50 text-rose-900';
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-900 font-semibold'
+                            : 'border-rose-300 bg-rose-50 text-rose-900 font-semibold';
                         }
 
                         if (isCurrent) {
-                          styleClass += ' ring-2 ring-teal-700 ring-offset-1';
+                          styleClass += ' ring-2 ring-teal-700 ring-offset-1 font-extrabold';
                         }
 
                         return (
                           <button
                             key={q.id}
                             type="button"
+                            data-testid={`practice-nav-item-${idx + 1}`}
+                            title={`Câu ${idx + 1}${checkedHere ? (localCorrect ? ' (Đúng)' : ' (Sai)') : ''}`}
                             onClick={() => setPracticeIndex(idx)}
-                            className={`py-2 px-1 rounded-lg border text-xs font-mono tabular-nums transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer ${styleClass}`}
+                            className={`h-7 rounded-md border text-[11px] font-mono tabular-nums transition-all flex items-center justify-center relative cursor-pointer ${styleClass}`}
                           >
                             <span>{idx + 1}</span>
-                            <span className="text-[9px] font-sans flex items-center gap-0.5 leading-none">
-                              {isBookmarked && <span className="text-amber-600">★</span>}
-                              <span>{checkedHere ? (localCorrect ? '✓ Đúng' : '✗ Sai') : 'Câu ' + (idx + 1)}</span>
-                            </span>
+                            {isBookmarked && (
+                              <span className="absolute -top-0.5 right-0.5 text-[8px] text-amber-500 leading-none">
+                                ★
+                              </span>
+                            )}
                           </button>
                         );
                       })}
@@ -1377,25 +1629,25 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         )}
 
         {/* =====================================================================
-            TAB 2: KHO CÂU SAI (MISTAKE REVIEW TAB)
+            TAB 2: KHO CÂU SAI (MISTAKE REVIEW TAB) — KÈM THANH ĐO TIẾN ĐỘ KHẮC PHỤC
            ===================================================================== */}
         {activeTab === 'mistakes' && (
           <div className="space-y-6">
-            <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+            <section className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="space-y-1">
-                  <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-rose-700">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>Kho câu sai cá nhân (Đồng bộ Firestore `wrongQuestions`)</span>
+                  <div className="inline-flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-rose-700 bg-rose-50 border border-rose-200/80 px-3 py-1 rounded-full">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Kho câu sai cá nhân</span>
                   </div>
-                  <h2 className="text-lg sm:text-xl font-bold text-slate-900">
+                  <h2 className="text-lg sm:text-xl font-bold text-slate-900 pt-1">
                     Ôn luyện & Khắc phục Câu hỏi Làm sai ({wrongQuestionsList.length} câu cần khắc phục)
                   </h2>
                   <p className="text-xs sm:text-sm text-slate-600">
                     Mọi câu hỏi bạn trả lời sai trong <strong>Chế độ Luyện tập</strong> hoặc{' '}
-                    <strong>Chế độ Thi thử (Mock Exam)</strong> đều tự động được đưa vào đây. Khi
+                    <strong>Chế độ Thi thử (Mock Exam)</strong> đều tự động được lưu tại đây. Khi
                     làm lại và trả lời <strong>ĐÚNG 100%</strong>, bạn có thể xác nhận{' '}
-                    <strong>"Đã nắm vững (Xóa khỏi kho câu sai)"</strong>.
+                    <strong>"Đã nắm vững"</strong> để xóa khỏi kho câu sai.
                   </p>
                 </div>
 
@@ -1407,7 +1659,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       setMistakeTopicFilter(e.target.value);
                       setMistakeIndex(0);
                     }}
-                    className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800"
+                    className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-800"
                   >
                     <option value="ALL">
                       Tất cả chuyên đề ({wrongQuestionIds.length} câu sai)
@@ -1418,29 +1670,66 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       </option>
                     ))}
                   </select>
-
-                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 bg-slate-100 px-3.5 py-2 rounded-lg cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={autoRemoveOnMastery}
-                      onChange={(e) => setAutoRemoveOnMastery(e.target.checked)}
-                      className="rounded border-slate-300 text-teal-700 focus:ring-teal-600"
-                    />
-                    <span>Tự động xóa khỏi Kho câu sai khi trả lời ĐÚNG</span>
-                  </label>
                 </div>
               </div>
 
+              {/* Thanh đo Tiến độ Khắc phục: Đã khắc phục X / Tổng số câu sai */}
+              {(() => {
+                const totalMistakesEver =
+                  masteredQuestionIds.length + wrongQuestionIds.length;
+                const masteryPercent =
+                  totalMistakesEver > 0
+                    ? Math.round((masteredQuestionIds.length / totalMistakesEver) * 100)
+                    : 100;
+                return (
+                  <div
+                    data-testid="mistake-mastery-progress"
+                    className="p-4 rounded-xl bg-slate-50/90 border border-slate-200/80 space-y-2"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                        <Award className="w-4 h-4 text-emerald-600" />
+                        <span>
+                          Tiến độ khắc phục Kho câu sai:{' '}
+                          <strong className="font-mono text-emerald-700">
+                            Đã khắc phục {masteredQuestionIds.length} / {totalMistakesEver} câu sai
+                          </strong>
+                        </span>
+                      </span>
+                      <span className="font-mono font-extrabold text-emerald-800 bg-emerald-100/90 px-2.5 py-0.5 rounded-full tabular-nums">
+                        {masteryPercent}% Hoàn thành
+                      </span>
+                    </div>
+                    <div className="h-2.5 w-full rounded-full bg-slate-200 overflow-hidden">
+                      <div
+                        style={{ width: `${masteryPercent}%` }}
+                        className="h-full rounded-full bg-gradient-to-r from-teal-600 to-emerald-500 transition-all duration-500 ease-out"
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+
               {masteredSuccessNote && (
-                <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-300 text-xs sm:text-sm font-semibold text-emerald-900 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>{masteredSuccessNote}</span>
+                <div
+                  role="status"
+                  className="animate-feedback-reveal p-4 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-amber-50 border border-emerald-300 text-xs sm:text-sm font-bold text-emerald-950 flex items-center justify-between gap-3 shadow-xs"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                      <Sparkles className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-700">
+                        Chúc mừng bạn đã chinh phục kiến thức!
+                      </div>
+                      <div>{masteredSuccessNote}</div>
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setMasteredSuccessNote(null)}
-                    className="text-xs text-emerald-800 underline shrink-0"
+                    className="px-2.5 py-1 rounded-lg bg-white/80 hover:bg-white text-xs font-bold text-emerald-800 border border-emerald-200 shrink-0 cursor-pointer"
                   >
                     Đóng
                   </button>
@@ -1715,8 +2004,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             setPracticeTopic(topic);
                             setPracticeType('ALL');
                             setPracticeDrawSize('ALL');
-                            setPracticeDrawSeed((s) => s + 1);
                             setOnlyBookmarked(false);
+                            setPracticeSessionIds(
+                              buildLockedPracticeSessionIds({
+                                topic,
+                                type: 'ALL',
+                                drawSize: 'ALL',
+                                bookmarkedOnly: false,
+                              })
+                            );
                             setPracticeIndex(0);
                             setIsPracticeSetupOpen(true);
                             setActiveTab('practice');
@@ -1749,7 +2045,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             onChangeFontScale={setFontScale}
             isFocusMode={isZenHeaderHidden}
             onToggleFocusMode={() => setIsZenHeaderHidden((prev) => !prev)}
-            onExamPhaseChange={setIsMockExamInProgress}
+            onExamPhaseChange={(inProgress) => {
+              setIsMockExamInProgress(inProgress);
+              setIsZenHeaderHidden(inProgress);
+            }}
           />
         )}
 

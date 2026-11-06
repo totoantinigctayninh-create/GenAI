@@ -2,14 +2,14 @@ import React, { useMemo, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
-  Bookmark,
   Check,
   CheckCircle2,
   GripVertical,
-  HelpCircle,
+  Lightbulb,
   Link2,
   Puzzle,
   RotateCcw,
+  Sparkles,
   Star,
   Trash2,
   X,
@@ -194,13 +194,11 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
     const existingIdx = current.indexOf(stepId);
 
     if (existingIdx !== -1) {
-      // Đổi chỗ hoặc chèn vào vị trí đích
       current.splice(existingIdx, 1);
       const insertAt = Math.min(targetSlotIdx, current.length);
       current.splice(insertAt, 0, stepId);
       onChangeAnswer(current);
     } else {
-      // Kéo từ kho bên trái vào vị trí đích
       const insertAt = Math.min(targetSlotIdx, current.length);
       current.splice(insertAt, 0, stepId);
       onChangeAnswer(current);
@@ -219,46 +217,107 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
     return /\(\s*Chọn\s+\d+\s*\)/i.test(question.prompt);
   }, [question.prompt, question.type]);
 
+  // Cỡ chữ chuẩn 16-17px dễ đọc khi ôn tập thời gian dài
   const promptTextSizeClass =
     fontScale === 'xlarge'
-      ? 'text-xl sm:text-2xl leading-relaxed'
+      ? 'text-lg sm:text-xl leading-relaxed'
       : fontScale === 'large'
-        ? 'text-lg sm:text-xl leading-relaxed'
-        : 'text-base sm:text-lg leading-relaxed';
+        ? 'text-base sm:text-[18px] leading-relaxed'
+        : 'text-[15px] sm:text-[17px] leading-relaxed';
 
   const optionTextSizeClass =
     fontScale === 'xlarge'
-      ? 'text-base sm:text-lg leading-relaxed'
+      ? 'text-base sm:text-lg leading-snug'
       : fontScale === 'large'
-        ? 'text-base sm:text-[17px] leading-relaxed'
-        : 'text-sm sm:text-base leading-relaxed';
+        ? 'text-sm sm:text-[16px] leading-snug'
+        : 'text-[13px] sm:text-[15px] leading-snug';
+
+  const selectedMultipleCount = Array.isArray(userAnswer) ? userAnswer.length : 0;
+  const matchedPairCount =
+    userAnswer && typeof userAnswer === 'object' && !Array.isArray(userAnswer)
+      ? Object.keys(userAnswer).length
+      : 0;
 
   return (
     <div
       data-testid="question-renderer-card"
       data-font-scale={fontScale}
-      className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden"
+      className="bg-white border border-slate-200/80 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 ease-in-out overflow-hidden"
     >
-      {/* Thanh thông tin câu hỏi theo chuẩn phòng thi Certiport */}
-      <div className="px-6 py-4 bg-sky-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-          <span className="font-bold text-teal-800 bg-white border border-teal-200 px-2.5 py-1 rounded-md tabular-nums">
+      {/* Thanh Header câu hỏi: Nhãn bo tròn mềm (rounded-full / rounded-lg) & phân cấp rõ ràng */}
+      <div className="px-4 sm:px-6 py-3 bg-slate-50/90 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-extrabold text-teal-800 bg-teal-50 border border-teal-200/90 px-3 py-1 rounded-full tabular-nums shadow-2xs">
             {questionNumber !== undefined && totalQuestions !== undefined
               ? `Câu ${questionNumber} / ${totalQuestions}`
-              : `Mã câu: ${question.id.toUpperCase()}`}
+              : question.id.toUpperCase()}
           </span>
-          <span aria-hidden="true">·</span>
-          <span className="text-slate-700 font-semibold">{question.topic}</span>
-          <span aria-hidden="true">·</span>
-          <span className="text-teal-700 font-semibold">
+          <span className="px-2.5 py-1 rounded-lg bg-white border border-slate-200/80 text-slate-700 font-semibold">
+            {question.topic}
+          </span>
+          <span className="px-2.5 py-1 rounded-lg bg-sky-50/80 border border-sky-200/70 text-teal-800 font-semibold">
             {QUESTION_TYPE_LABELS[question.type]}
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="hidden sm:inline text-xs text-slate-500 tabular-nums">
-            Chuẩn Certiport: Đúng 100% = 1 điểm · Sai 1 ý = 0 điểm
-          </span>
+        <div className="flex items-center gap-2">
+          {/* Ghi chú ngắn gọn theo từng dạng bài ngay trên thanh tiêu đề */}
+          {question.type === 'mcq_single' && (
+            <span className="text-[11px] font-semibold text-slate-500 bg-white px-2.5 py-1 rounded-full border border-slate-200/70">
+              Chọn 1 đáp án đúng
+            </span>
+          )}
+          {question.type === 'mcq_multiple' && (
+            <span className="text-[11px] font-mono font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-full tabular-nums">
+              Chọn {maxAllowedMultiple} · Đã chọn: {selectedMultipleCount}/{maxAllowedMultiple}
+            </span>
+          )}
+          {question.type === 'dropdown' && (
+            <span className="text-[11px] font-semibold text-slate-500 bg-white px-2.5 py-1 rounded-full border border-slate-200/70">
+              Chọn từ hộp - Select -
+            </span>
+          )}
+          {question.type === 'matching' && question.pairs && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-mono font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-full tabular-nums">
+                Đã ghép: {matchedPairCount}/{question.pairs.length}
+              </span>
+              {!readOnly && matchedPairCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onChangeAnswer({})}
+                  className="px-2.5 py-1 rounded-full border border-slate-300 bg-white text-[11px] font-semibold text-slate-700 hover:bg-slate-100 transition-all duration-200 inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" /> Làm mới
+                </button>
+              )}
+            </div>
+          )}
+          {question.type === 'ordering' && question.steps && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-mono font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-full tabular-nums">
+                Đã xếp: {orderedStepIds.length}/{question.steps.length}
+              </span>
+              {!readOnly && availablePoolSteps.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleAutoOrderAll}
+                  className="px-2.5 py-1 rounded-full bg-teal-700 text-white text-[11px] font-semibold hover:bg-teal-800 transition-all duration-200 cursor-pointer"
+                >
+                  + Đưa hết sang khung
+                </button>
+              )}
+              {!readOnly && orderedStepIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onChangeAnswer([])}
+                  className="px-2.5 py-1 rounded-full border border-slate-300 bg-white text-[11px] font-semibold text-slate-700 hover:bg-slate-100 transition-all duration-200 cursor-pointer"
+                >
+                  Đặt lại
+                </button>
+              )}
+            </div>
+          )}
 
           {onToggleBookmark && (
             <button
@@ -269,10 +328,10 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                   ? 'Bỏ đánh dấu câu hỏi (Bookmark)'
                   : 'Đánh dấu câu hỏi (Bookmark)'
               }
-              className={`px-3 py-1.5 rounded-lg border text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-full border text-xs font-semibold inline-flex items-center gap-1.5 transition-all duration-200 cursor-pointer ${
                 isBookmarked
                   ? 'border-amber-400 bg-amber-50 text-amber-800 shadow-2xs'
-                  : 'border-slate-300 bg-white text-slate-700 hover:border-teal-600 hover:text-teal-800'
+                  : 'border-slate-300 bg-white text-slate-600 hover:border-teal-600 hover:text-teal-800'
               }`}
             >
               <Star
@@ -280,34 +339,30 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                   isBookmarked ? 'fill-amber-400 text-amber-500' : 'text-slate-400'
                 }`}
               />
-              <span>{isBookmarked ? 'Đã lưu Bookmark' : 'Đánh dấu (Bookmark)'}</span>
+              <span className="hidden sm:inline">
+                {isBookmarked ? 'Đã lưu' : 'Đánh dấu'}
+              </span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Nội dung câu hỏi chính */}
-      <div className="p-6 sm:p-7 space-y-6">
-        <div className="space-y-2.5">
-          <div className="flex flex-wrap items-baseline gap-2">
-            <p className={`${promptTextSizeClass} font-semibold text-slate-900`}>
-              {question.prompt}
-              {question.type === 'mcq_multiple' && !promptHasChooseNote && (
-                <span className="ml-2 inline-block text-teal-800 font-bold">
-                  (Chọn {maxAllowedMultiple})
-                </span>
-              )}
-            </p>
-          </div>
-
-          {question.instruction && (
-            <p className="text-xs text-slate-500 italic">{question.instruction}</p>
-          )}
+      {/* Nội dung câu hỏi chính (Hệ thống khoảng cách 8pt chuẩn mực) */}
+      <div className="p-4 sm:p-6 space-y-4">
+        <div className="space-y-3">
+          <p className={`${promptTextSizeClass} font-bold text-slate-900 tracking-tight`}>
+            {question.prompt}
+            {question.type === 'mcq_multiple' && !promptHasChooseNote && (
+              <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-teal-50 text-teal-800 border border-teal-200 align-middle">
+                Chọn {maxAllowedMultiple}
+              </span>
+            )}
+          </p>
 
           {question.imageUrl && (
             <div
               data-testid="question-rendered-image-box"
-              className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2"
+              className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-3 space-y-2"
             >
               <div className="flex items-center justify-between text-xs text-slate-600">
                 <span className="font-semibold text-teal-800">
@@ -318,7 +373,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                   onClick={() => setIsZoomedImageOpen(true)}
                   className="text-xs font-semibold text-teal-700 hover:underline cursor-pointer"
                 >
-                  Bấm vào ảnh để phóng to ↗
+                  Phóng to ảnh ↗
                 </button>
               </div>
               <div className="flex justify-center bg-white rounded-lg border border-slate-200/80 p-2">
@@ -327,7 +382,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                   alt={`Hình minh họa cho câu hỏi ${question.id.toUpperCase()}`}
                   referrerPolicy="no-referrer"
                   onClick={() => setIsZoomedImageOpen(true)}
-                  className="max-h-72 w-auto rounded object-contain cursor-zoom-in"
+                  className="max-h-52 w-auto rounded object-contain cursor-zoom-in"
                 />
               </div>
             </div>
@@ -339,11 +394,11 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
               aria-modal="true"
               aria-label="Xem phóng to hình ảnh câu hỏi"
               onClick={() => setIsZoomedImageOpen(false)}
-              className="fixed inset-0 z-50 bg-slate-900/80 flex items-center justify-center p-4"
+              className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4"
             >
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="bg-white rounded-2xl max-w-5xl w-full max-h-[92vh] p-4 flex flex-col gap-3 shadow-2xl"
+                className="bg-white rounded-2xl max-w-5xl w-full max-h-[92vh] p-4 flex flex-col gap-3 shadow-2xl border border-slate-200"
               >
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
                   <span className="text-sm font-bold text-slate-900">
@@ -372,184 +427,221 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
 
         {/* =====================================================================
             DẠNG 1A: TRẮC NGHIỆM 1 LỰA CHỌN (RADIO BUTTON TRÒN CHUẨN CERTIPORT)
+            Tối ưu hiển thị tô màu câu Đúng (Emerald Mint) / Sai (Rose Coral) dịu mắt
            ===================================================================== */}
         {question.type === 'mcq_single' && question.options && (
-          <div className="space-y-3" role="radiogroup" aria-label={question.prompt}>
-            <div className="text-xs font-medium text-slate-500 flex items-center gap-2">
-              <span className="inline-block w-3.5 h-3.5 rounded-full border-2 border-teal-700" />
-              <span>Dạng 1 (Radio Button): Chọn duy nhất 1 phương án đúng</span>
-            </div>
+          <div className="space-y-2.5" role="radiogroup" aria-label={question.prompt}>
+            {question.options.map((opt, idx) => {
+              const isSelected = userAnswer === opt.id;
+              const isOptionCorrect = question.correctAnswer === opt.id;
+              const letter = String.fromCharCode(65 + idx);
 
-            <div className="space-y-2.5">
-              {question.options.map((opt, idx) => {
-                const isSelected = userAnswer === opt.id;
-                const isOptionCorrect = question.correctAnswer === opt.id;
-                const letter = String.fromCharCode(65 + idx);
-
-                let containerClass =
-                  'border-slate-200 bg-white hover:border-teal-500/70 hover:bg-sky-50/40';
-                if (isSelected) {
-                  containerClass = 'border-teal-600 bg-teal-50/60 ring-1 ring-teal-600';
+              let containerClass =
+                'border-slate-200/90 bg-white hover:border-teal-500/80 hover:bg-teal-50/25 hover:shadow-2xs';
+              if (isSelected) {
+                containerClass =
+                  'border-teal-600 bg-teal-50/50 ring-1 ring-teal-600/50 shadow-2xs';
+              }
+              if (showFeedback) {
+                if (isOptionCorrect) {
+                  containerClass =
+                    'feedback-option-correct border-emerald-500 border-l-4 border-l-emerald-600 bg-emerald-50/85 ring-1 ring-emerald-500/20 shadow-2xs';
+                } else if (isSelected && !isOptionCorrect) {
+                  containerClass =
+                    'feedback-option-wrong border-rose-400 border-l-4 border-l-rose-500 bg-rose-50/85 ring-1 ring-rose-400/20 shadow-2xs';
+                } else {
+                  containerClass =
+                    'feedback-option-neutral border-slate-200/70 bg-slate-50/40 opacity-70';
                 }
-                if (showFeedback) {
-                  if (isOptionCorrect) {
-                    containerClass =
-                      'border-emerald-600 bg-emerald-50/80 ring-1 ring-emerald-600';
-                  } else if (isSelected && !isOptionCorrect) {
-                    containerClass = 'border-rose-600 bg-rose-50/80 ring-1 ring-rose-600';
-                  }
-                }
+              }
 
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={isSelected}
-                    disabled={readOnly}
-                    onClick={() => handleSelectSingle(opt.id)}
-                    className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all flex items-start gap-3.5 cursor-pointer disabled:cursor-default ${containerClass}`}
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  disabled={readOnly}
+                  onClick={() => handleSelectSingle(opt.id)}
+                  className={`w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ease-in-out flex items-start gap-3.5 cursor-pointer disabled:cursor-default ${containerClass}`}
+                >
+                  {/* Radio Button Tròn */}
+                  <span
+                    className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0 border-2 transition-all duration-200 ${
+                      showFeedback && isOptionCorrect
+                        ? 'border-emerald-600 bg-emerald-600 text-white'
+                        : showFeedback && isSelected && !isOptionCorrect
+                          ? 'border-rose-500 bg-rose-500 text-white'
+                          : isSelected
+                            ? 'border-teal-700 bg-teal-700 text-white'
+                            : 'border-slate-300 bg-white'
+                    }`}
                   >
-                    {/* Radio Button Tròn */}
+                    {showFeedback && isOptionCorrect ? (
+                      <Check className="w-3 h-3 stroke-[3]" />
+                    ) : showFeedback && isSelected && !isOptionCorrect ? (
+                      <X className="w-3 h-3 stroke-[3]" />
+                    ) : isSelected ? (
+                      <span className="w-2 h-2 rounded-full bg-white" />
+                    ) : null}
+                  </span>
+
+                  <div className={`flex-1 ${optionTextSizeClass} text-slate-800`}>
                     <span
-                      className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0 border-2 transition-colors ${
+                      className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-xs font-mono font-bold mr-2.5 ${
                         showFeedback && isOptionCorrect
-                          ? 'border-emerald-600 bg-white'
+                          ? 'bg-emerald-600 text-white'
                           : showFeedback && isSelected && !isOptionCorrect
-                            ? 'border-rose-600 bg-white'
+                            ? 'bg-rose-500 text-white'
                             : isSelected
-                              ? 'border-teal-700 bg-white'
-                              : 'border-slate-400 bg-white'
+                              ? 'bg-teal-100 text-teal-900'
+                              : 'bg-slate-100 text-slate-600'
                       }`}
                     >
-                      {isSelected && (
-                        <span
-                          className={`w-2.5 h-2.5 rounded-full ${
-                            showFeedback
-                              ? isOptionCorrect
-                                ? 'bg-emerald-600'
-                                : 'bg-rose-600'
-                              : 'bg-teal-700'
-                          }`}
-                        />
-                      )}
+                      {letter}
                     </span>
+                    <span
+                      className={
+                        showFeedback && isOptionCorrect
+                          ? 'font-bold text-emerald-950'
+                          : showFeedback && isSelected && !isOptionCorrect
+                            ? 'font-semibold text-rose-950'
+                            : isSelected
+                              ? 'font-semibold text-slate-900'
+                              : ''
+                      }
+                    >
+                      {opt.text}
+                    </span>
+                  </div>
 
-                    <div className={`flex-1 ${optionTextSizeClass} text-slate-800`}>
-                      <span className="font-mono font-bold text-slate-700 mr-2">
-                        {letter}.
-                      </span>
-                      <span>{opt.text}</span>
-                    </div>
-
-                    {showFeedback && isOptionCorrect && (
-                      <span className="text-xs font-semibold text-emerald-700 shrink-0 flex items-center gap-1 bg-emerald-100/80 px-2.5 py-1 rounded-md">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Đáp án đúng
-                      </span>
-                    )}
-                    {showFeedback && isSelected && !isOptionCorrect && (
-                      <span className="text-xs font-semibold text-rose-700 shrink-0 flex items-center gap-1 bg-rose-100/80 px-2.5 py-1 rounded-md">
-                        <XCircle className="w-3.5 h-3.5" /> Bạn chọn sai
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                  {showFeedback && isOptionCorrect && (
+                    <span className="text-[11px] font-bold text-emerald-900 shrink-0 whitespace-nowrap inline-flex items-center gap-1 bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 rounded-full">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>{isSelected ? 'Bạn chọn đúng' : 'Đáp án đúng'}</span>
+                    </span>
+                  )}
+                  {showFeedback && isSelected && !isOptionCorrect && (
+                    <span className="text-[11px] font-bold text-rose-900 shrink-0 whitespace-nowrap inline-flex items-center gap-1 bg-rose-100 border border-rose-300 px-2.5 py-0.5 rounded-full">
+                      <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      <span>Bạn chọn sai</span>
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
 
         {/* =====================================================================
             DẠNG 1B: TRẮC NGHIỆM NHIỀU LỰA CHỌN (CHECKBOX VUÔNG CHUẨN CERTIPORT)
+            Tối ưu hiển thị tô màu câu Đúng / Sai dịu mắt, dễ phân biệt
            ===================================================================== */}
         {question.type === 'mcq_multiple' && question.options && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700 bg-sky-50/90 border border-sky-200 px-4 py-2.5 rounded-lg">
-              <div className="flex items-center gap-2">
-                <span className="inline-block w-3.5 h-3.5 rounded-xs border-2 border-teal-700" />
-                <span>
-                  Dạng 1 (Checkbox vuông): Hãy chọn chính xác{' '}
-                  <strong className="text-teal-900 tabular-nums">
-                    {maxAllowedMultiple} phương án đúng (Chọn {maxAllowedMultiple})
-                  </strong>
-                </span>
-              </div>
-              <span className="font-mono tabular-nums font-semibold text-teal-800 bg-white px-2.5 py-0.5 rounded border border-sky-200">
-                Đã chọn: {Array.isArray(userAnswer) ? userAnswer.length : 0} /{' '}
-                {maxAllowedMultiple}
-              </span>
-            </div>
+          <div className="space-y-2.5">
+            {question.options.map((opt, idx) => {
+              const selectedArr = Array.isArray(userAnswer) ? userAnswer : [];
+              const isSelected = selectedArr.includes(opt.id);
+              const correctArr = Array.isArray(question.correctAnswer)
+                ? question.correctAnswer
+                : [];
+              const isOptionCorrect = correctArr.includes(opt.id);
+              const letter = String.fromCharCode(65 + idx);
 
-            <div className="space-y-2.5">
-              {question.options.map((opt, idx) => {
-                const selectedArr = Array.isArray(userAnswer) ? userAnswer : [];
-                const isSelected = selectedArr.includes(opt.id);
-                const correctArr = Array.isArray(question.correctAnswer)
-                  ? question.correctAnswer
-                  : [];
-                const isOptionCorrect = correctArr.includes(opt.id);
-                const letter = String.fromCharCode(65 + idx);
-
-                let containerClass =
-                  'border-slate-200 bg-white hover:border-teal-500/70 hover:bg-sky-50/40';
-                if (isSelected) {
-                  containerClass = 'border-teal-600 bg-teal-50/60 ring-1 ring-teal-600';
+              let containerClass =
+                'border-slate-200/90 bg-white hover:border-teal-500/80 hover:bg-teal-50/25 hover:shadow-2xs';
+              if (isSelected) {
+                containerClass =
+                  'border-teal-600 bg-teal-50/50 ring-1 ring-teal-600/50 shadow-2xs';
+              }
+              if (showFeedback) {
+                if (isOptionCorrect) {
+                  containerClass =
+                    'feedback-option-correct border-emerald-500 border-l-4 border-l-emerald-600 bg-emerald-50/85 ring-1 ring-emerald-500/20 shadow-2xs';
+                } else if (isSelected && !isOptionCorrect) {
+                  containerClass =
+                    'feedback-option-wrong border-rose-400 border-l-4 border-l-rose-500 bg-rose-50/85 ring-1 ring-rose-400/20 shadow-2xs';
+                } else {
+                  containerClass =
+                    'feedback-option-neutral border-slate-200/70 bg-slate-50/40 opacity-70';
                 }
-                if (showFeedback) {
-                  if (isOptionCorrect) {
-                    containerClass =
-                      'border-emerald-600 bg-emerald-50/80 ring-1 ring-emerald-600';
-                  } else if (isSelected && !isOptionCorrect) {
-                    containerClass = 'border-rose-600 bg-rose-50/80 ring-1 ring-rose-600';
-                  }
-                }
+              }
 
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    role="checkbox"
-                    aria-checked={isSelected}
-                    disabled={readOnly}
-                    onClick={() => handleToggleMultiple(opt.id)}
-                    className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all flex items-start gap-3.5 cursor-pointer disabled:cursor-default ${containerClass}`}
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={isSelected}
+                  disabled={readOnly}
+                  onClick={() => handleToggleMultiple(opt.id)}
+                  className={`w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ease-in-out flex items-start gap-3.5 cursor-pointer disabled:cursor-default ${containerClass}`}
+                >
+                  {/* Checkbox Vuông */}
+                  <span
+                    className={`mt-0.5 w-5 h-5 rounded-md flex items-center justify-center shrink-0 border-2 transition-all duration-200 ${
+                      showFeedback && isOptionCorrect
+                        ? 'border-emerald-600 bg-emerald-600 text-white'
+                        : showFeedback && isSelected && !isOptionCorrect
+                          ? 'border-rose-500 bg-rose-500 text-white'
+                          : isSelected
+                            ? 'border-teal-700 bg-teal-700 text-white'
+                            : 'border-slate-300 bg-white'
+                    }`}
                   >
-                    {/* Checkbox Vuông */}
+                    {showFeedback && isOptionCorrect ? (
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    ) : showFeedback && isSelected && !isOptionCorrect ? (
+                      <X className="w-3.5 h-3.5 stroke-[3]" />
+                    ) : isSelected ? (
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    ) : null}
+                  </span>
+
+                  <div className={`flex-1 ${optionTextSizeClass} text-slate-800`}>
                     <span
-                      className={`mt-0.5 w-5 h-5 rounded-md flex items-center justify-center shrink-0 border-2 transition-colors ${
+                      className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-xs font-mono font-bold mr-2.5 ${
                         showFeedback && isOptionCorrect
-                          ? 'border-emerald-600 bg-emerald-600 text-white'
+                          ? 'bg-emerald-600 text-white'
                           : showFeedback && isSelected && !isOptionCorrect
-                            ? 'border-rose-600 bg-rose-600 text-white'
+                            ? 'bg-rose-500 text-white'
                             : isSelected
-                              ? 'border-teal-700 bg-teal-700 text-white'
-                              : 'border-slate-400 bg-white'
+                              ? 'bg-teal-100 text-teal-900'
+                              : 'bg-slate-100 text-slate-600'
                       }`}
                     >
-                      {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      {letter}
                     </span>
+                    <span
+                      className={
+                        showFeedback && isOptionCorrect
+                          ? 'font-bold text-emerald-950'
+                          : showFeedback && isSelected && !isOptionCorrect
+                            ? 'font-semibold text-rose-950'
+                            : isSelected
+                              ? 'font-semibold text-slate-900'
+                              : ''
+                      }
+                    >
+                      {opt.text}
+                    </span>
+                  </div>
 
-                    <div className={`flex-1 ${optionTextSizeClass} text-slate-800`}>
-                      <span className="font-mono font-bold text-slate-700 mr-2">
-                        {letter}.
-                      </span>
-                      <span>{opt.text}</span>
-                    </div>
-
-                    {showFeedback && isOptionCorrect && (
-                      <span className="text-xs font-semibold text-emerald-700 shrink-0 flex items-center gap-1 bg-emerald-100/80 px-2.5 py-1 rounded-md">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Đáp án chuẩn
-                      </span>
-                    )}
-                    {showFeedback && isSelected && !isOptionCorrect && (
-                      <span className="text-xs font-semibold text-rose-700 shrink-0 flex items-center gap-1 bg-rose-100/80 px-2.5 py-1 rounded-md">
-                        <XCircle className="w-3.5 h-3.5" /> Chọn thừa / sai
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                  {showFeedback && isOptionCorrect && (
+                    <span className="text-[11px] font-bold text-emerald-900 shrink-0 whitespace-nowrap inline-flex items-center gap-1 bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 rounded-full">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>{isSelected ? 'Chọn đúng' : 'Đáp án chuẩn'}</span>
+                    </span>
+                  )}
+                  {showFeedback && isSelected && !isOptionCorrect && (
+                    <span className="text-[11px] font-bold text-rose-900 shrink-0 whitespace-nowrap inline-flex items-center gap-1 bg-rose-100 border border-rose-300 px-2.5 py-0.5 rounded-full">
+                      <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      <span>Chọn sai</span>
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -557,8 +649,8 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
             DẠNG 2: MENU THẢ XUỐNG (- Select - DROPDOWN CHUẨN PHÒNG THI CERTIPORT)
            ===================================================================== */}
         {question.type === 'dropdown' && question.subItems && (
-          <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-            <div className="grid grid-cols-12 bg-slate-100 px-5 py-3 text-xs font-bold text-slate-700 border-b border-slate-200">
+          <div className="border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs">
+            <div className="grid grid-cols-12 bg-slate-100/90 px-4 py-2.5 text-xs font-bold text-slate-700 border-b border-slate-200/80">
               <div className="col-span-12 sm:col-span-7">
                 {question.dropdownColumns?.[0] || 'Mệnh đề / Nhận định đánh giá'}
               </div>
@@ -567,7 +659,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
               </div>
             </div>
 
-            <div className="divide-y divide-slate-200">
+            <div className="divide-y divide-slate-200/80">
               {question.subItems.map((sub, idx) => {
                 const currentMap =
                   userAnswer && typeof userAnswer === 'object' && !Array.isArray(userAnswer)
@@ -583,10 +675,24 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                 return (
                   <div
                     key={sub.id}
-                    className="grid grid-cols-12 items-center gap-4 px-5 py-4 bg-white hover:bg-sky-50/30 transition-colors"
+                    className={`grid grid-cols-12 items-center gap-3 px-4 py-3 transition-all duration-200 ${
+                      showFeedback
+                        ? subCorrect
+                          ? 'feedback-option-correct bg-emerald-50/70 border-l-4 border-l-emerald-500'
+                          : 'feedback-option-wrong bg-rose-50/70 border-l-4 border-l-rose-500'
+                        : 'bg-white hover:bg-slate-50/80'
+                    }`}
                   >
                     <div className="col-span-12 sm:col-span-7 flex items-start gap-3">
-                      <span className="w-6 h-6 rounded-md bg-slate-100 border border-slate-200 text-xs font-mono font-semibold text-slate-600 flex items-center justify-center shrink-0 tabular-nums mt-0.5">
+                      <span
+                        className={`w-6 h-6 rounded-lg text-xs font-mono font-bold flex items-center justify-center shrink-0 tabular-nums mt-0.5 ${
+                          showFeedback
+                            ? subCorrect
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-rose-500 text-white'
+                            : 'bg-slate-100 border border-slate-200 text-slate-700'
+                        }`}
+                      >
                         {idx + 1}
                       </span>
                       <span className={`${optionTextSizeClass} text-slate-800 font-medium`}>
@@ -600,13 +706,13 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                         disabled={readOnly}
                         value={selectedVal}
                         onChange={(e) => handleSelectDropdown(sub.id, e.target.value)}
-                        className={`w-full px-3.5 py-2.5 text-sm rounded-lg border bg-white font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-teal-600 cursor-pointer disabled:cursor-default ${
+                        className={`w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border bg-white font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-teal-600 cursor-pointer disabled:cursor-default ${
                           showFeedback
                             ? subCorrect
-                              ? 'border-emerald-600 bg-emerald-50/70 text-emerald-900'
-                              : 'border-rose-500 bg-rose-50/70 text-rose-900'
+                              ? 'border-emerald-500 bg-emerald-50/85 text-emerald-950'
+                              : 'border-rose-400 bg-rose-50/85 text-rose-950'
                             : selectedVal
-                              ? 'border-teal-600 text-teal-900 bg-teal-50/40'
+                              ? 'border-teal-600 text-teal-900 bg-teal-50/30'
                               : 'border-slate-300 text-slate-700'
                         }`}
                       >
@@ -619,15 +725,19 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                       </select>
 
                       {showFeedback && (
-                        <div className="flex items-center justify-between text-xs px-1">
+                        <div className="flex items-center justify-between text-[11px] px-1">
                           {subCorrect ? (
-                            <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Chính xác ({expectedVal})
+                            <span className="text-emerald-800 font-bold inline-flex items-center gap-1 bg-emerald-100/80 border border-emerald-200 px-2 py-0.5 rounded-full">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>Chính xác ({expectedVal})</span>
                             </span>
                           ) : (
-                            <span className="text-rose-700 font-semibold flex items-center gap-1">
-                              <XCircle className="w-3.5 h-3.5" /> Đáp án đúng:{' '}
-                              <strong className="underline">{expectedVal}</strong>
+                            <span className="text-rose-800 font-bold inline-flex items-center gap-1 bg-rose-100/80 border border-rose-200 px-2 py-0.5 rounded-full">
+                              <XCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                              <span>
+                                Đáp án đúng:{' '}
+                                <strong className="underline text-emerald-800">{expectedVal}</strong>
+                              </span>
                             </span>
                           )}
                         </div>
@@ -641,41 +751,25 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
         )}
 
         {/* =====================================================================
-            DẠNG 3: KÉO THẢ NỐI CÂU (DRAG & DROP PUZZLE MATCHING 2 CỘT)
+            DẠNG 3: KÉO THẢ NỐI MẢNH GHÉP (PUZZLE MATCHING NÂNG CẤP TRỰC QUAN)
+            - Phân biệt rõ mảnh chưa ghép & đã ghép
+            - Ô đích phát sáng nét đứt (dashed pulse) khi đang kéo hoặc chọn thẻ trái
+            - Có nút hủy nối từng cặp nhanh gọn
            ===================================================================== */}
         {question.type === 'matching' && question.pairs && (
-          <div className="space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700 bg-sky-50/90 border border-sky-200 px-4 py-3 rounded-xl">
-              <div className="flex items-center gap-2">
-                <Puzzle className="w-4 h-4 text-teal-700 shrink-0" />
-                <span>
-                  <strong>Cách thao tác Puzzle Matching:</strong> Kéo thả trực tiếp thẻ mảnh ghép ở{' '}
-                  <strong>Kho mảnh ghép (Cột phải)</strong> vào ô khớp nối bên cạnh{' '}
-                  <strong>Cột trái</strong>, hoặc bấm chọn dòng cột trái rồi bấm mảnh ghép tương ứng.
-                </span>
-              </div>
-              {!readOnly && (
-                <button
-                  type="button"
-                  onClick={() => onChangeAnswer({})}
-                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" /> Xóa tất cả cặp nối
-                </button>
-              )}
-            </div>
-
+          <div className="space-y-4">
             {/* Kho mảnh ghép nguồn để kéo thả hoặc bấm chọn nhanh */}
-            <div className="p-4 bg-slate-100/90 rounded-xl border border-slate-200 space-y-2.5">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                <span>Kho thẻ mảnh ghép (Kéo thẻ thả vào ô bên dưới hoặc bấm để nối):</span>
-                <span className="font-mono text-teal-800 tabular-nums">
-                  Đã ghép:{' '}
-                  {userAnswer && typeof userAnswer === 'object' && !Array.isArray(userAnswer)
-                    ? Object.keys(userAnswer).length
-                    : 0}{' '}
-                  / {question.pairs.length} cặp
+            <div className="p-4 bg-slate-50/90 rounded-2xl border border-slate-200/90 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <Puzzle className="w-4 h-4 text-teal-700" />
+                  <span>Kho mảnh ghép trả lời (Kéo thả vào ô đích hoặc bấm chọn):</span>
                 </span>
+                {selectedLeftPairId && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold text-[11px] animate-pulse">
+                    Đang chọn mệnh đề trái — Hãy bấm vào 1 mảnh ghép bên dưới để khớp nối!
+                  </span>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -684,10 +778,10 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                     userAnswer && typeof userAnswer === 'object' && !Array.isArray(userAnswer)
                       ? (userAnswer as Record<string, string>)
                       : {};
-                  const matchedLeftId = Object.keys(currentMap).find(
-                    (k) => currentMap[k] === rightText
+                  const matchedLeftIndex = question.pairs?.findIndex(
+                    (p) => currentMap[p.id] === rightText
                   );
-                  const isUsed = Boolean(matchedLeftId);
+                  const isUsed = matchedLeftIndex !== undefined && matchedLeftIndex >= 0;
 
                   return (
                     <div
@@ -726,22 +820,34 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                           }
                         }
                       }}
-                      className={`px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-medium border text-left transition-all flex items-center justify-between gap-2 select-none ${
+                      className={`px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-medium border transition-all duration-200 flex items-center justify-between gap-2.5 select-none ${
                         readOnly ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
                       } ${
                         isUsed
-                          ? 'bg-teal-50/80 border-teal-600/60 text-teal-950'
-                          : 'bg-white border-slate-300 text-slate-800 hover:border-teal-600 shadow-2xs'
+                          ? 'bg-teal-50/70 border-teal-500/60 text-teal-950 shadow-none'
+                          : 'bg-white border-slate-300 text-slate-800 hover:border-teal-600 hover:shadow-sm shadow-2xs'
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <GripVertical className="w-4 h-4 text-slate-400 shrink-0" />
-                        <Puzzle className="w-4 h-4 text-teal-700 shrink-0" />
-                        <span className="leading-snug">{rightText}</span>
+                        <span
+                          className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+                            isUsed
+                              ? 'bg-teal-700 text-white'
+                              : 'bg-slate-100 text-teal-700'
+                          }`}
+                        >
+                          <Puzzle className="w-3.5 h-3.5" />
+                        </span>
+                        <span className="leading-snug font-medium">{rightText}</span>
                       </div>
-                      {isUsed && (
-                        <span className="text-[11px] font-mono font-semibold bg-teal-700 text-white px-2 py-0.5 rounded shrink-0">
-                          Đã nối
+                      {isUsed ? (
+                        <span className="text-[11px] font-mono font-bold bg-teal-700 text-white px-2.5 py-0.5 rounded-full shrink-0">
+                          Đã nối #{matchedLeftIndex + 1}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-semibold text-slate-400 shrink-0 hidden sm:inline">
+                          Chưa ghép
                         </span>
                       )}
                     </div>
@@ -750,12 +856,12 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
               </div>
             </div>
 
-            {/* Bảng 2 Cột Mảnh Ghép (Cột Trái có mấu Puzzle Connector -> Cột Phải nhận mảnh ghép) */}
+            {/* Bảng 2 Cột Mảnh Ghép (Cột Trái có khớp nối bo cong tinh xảo -> Cột Phải nhận mảnh ghép) */}
             <div className="space-y-3">
-              <div className="hidden lg:grid lg:grid-cols-12 gap-4 px-2 text-xs font-bold text-slate-600">
-                <div className="lg:col-span-6">CỘT TRÁI: MỆNH ĐỀ / KỊCH BẢN GỐC</div>
+              <div className="hidden lg:grid lg:grid-cols-12 gap-4 px-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+                <div className="lg:col-span-6">Mảnh ghép Trái (Mệnh đề gốc)</div>
                 <div className="lg:col-span-6">
-                  CỘT PHẢI: MẢNH GHÉP TƯƠNG ỨNG (KÉO THẢ HOẶC CHỌN)
+                  Ô gắn mảnh ghép Phải (Kéo thả hoặc Chọn)
                 </div>
               </div>
 
@@ -769,55 +875,73 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                 const expectedRight = expectedMap[pair.id];
                 const isSelectedLeft = selectedLeftPairId === pair.id;
                 const isDragOver = dragOverPairId === pair.id;
+                const isTargetWaitingHighlight =
+                  !readOnly &&
+                  !showFeedback &&
+                  (isSelectedLeft || (Boolean(draggedMatchText) && !matchedRight));
                 const pairCorrect = showFeedback && matchedRight === expectedRight;
 
                 return (
                   <div
                     key={pair.id}
-                    className="grid grid-cols-1 lg:grid-cols-12 gap-0 lg:gap-3 items-stretch"
+                    className="grid grid-cols-1 lg:grid-cols-12 gap-2 lg:gap-3 items-stretch"
                   >
-                    {/* Cột trái: Thẻ gốc có khớp nối Puzzle lồi ở bên phải */}
+                    {/* Cột trái: Thẻ gốc có khớp nối Puzzle bo cong tinh xảo */}
                     <button
                       type="button"
                       disabled={readOnly}
                       onClick={() =>
                         setSelectedLeftPairId(isSelectedLeft ? null : pair.id)
                       }
-                      className={`lg:col-span-6 relative p-4 rounded-t-xl lg:rounded-xl border text-left transition-all flex items-center justify-between gap-3 cursor-pointer disabled:cursor-default ${
+                      className={`lg:col-span-6 relative p-4 rounded-2xl border text-left transition-all duration-200 flex items-center justify-between gap-3 cursor-pointer disabled:cursor-default ${
                         isSelectedLeft
-                          ? 'border-teal-600 bg-sky-50 ring-2 ring-teal-600/30'
-                          : 'border-slate-300 bg-slate-50/90 hover:bg-sky-50/50'
+                          ? 'border-teal-600 bg-teal-50/70 ring-2 ring-teal-500/30 shadow-xs'
+                          : matchedRight
+                            ? 'border-teal-600/60 bg-teal-50/30'
+                            : 'border-slate-200/90 bg-slate-50/80 hover:bg-white hover:border-slate-300'
                       }`}
                     >
-                      <div className="flex items-start gap-3 pr-3">
-                        <span className="w-6 h-6 rounded-md bg-teal-800 text-white text-xs font-mono font-bold flex items-center justify-center shrink-0 tabular-nums mt-0.5">
+                      <div className="flex items-start gap-3 pr-2">
+                        <span
+                          className={`w-7 h-7 rounded-xl text-xs font-mono font-bold flex items-center justify-center shrink-0 tabular-nums mt-0.5 shadow-2xs ${
+                            matchedRight
+                              ? 'bg-teal-700 text-white'
+                              : isSelectedLeft
+                                ? 'bg-amber-500 text-white'
+                                : 'bg-slate-800 text-white'
+                          }`}
+                        >
                           #{idx + 1}
                         </span>
-                        <span className="text-sm sm:text-base font-semibold text-slate-900 leading-snug">
+                        <span className={`${optionTextSizeClass} font-semibold text-slate-900`}>
                           {pair.left}
                         </span>
                       </div>
 
-                      {/* Khớp nối mảnh ghép (Puzzle Connector Tab) */}
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Khớp nối mảnh ghép bo cong tinh xảo (Puzzle Interlock Tab) */}
+                      <div className="flex items-center shrink-0">
                         <span
-                          className={`px-2 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 ${
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold inline-flex items-center gap-1 transition-all duration-200 ${
                             matchedRight
-                              ? 'bg-teal-700 text-white'
+                              ? 'bg-teal-700 text-white shadow-2xs'
                               : isSelectedLeft
-                                ? 'bg-sky-700 text-white'
-                                : 'bg-slate-200 text-slate-700'
+                                ? 'bg-amber-500 text-white animate-pulse'
+                                : 'bg-slate-200/90 text-slate-600'
                           }`}
                         >
                           <Puzzle className="w-3.5 h-3.5" />
                           <span className="hidden sm:inline">
-                            {matchedRight ? 'Đã khớp' : isSelectedLeft ? 'Đang chọn' : 'Khớp nối'}
+                            {matchedRight
+                              ? 'Đã khớp'
+                              : isSelectedLeft
+                                ? 'Đang chọn...'
+                                : 'Chưa ghép'}
                           </span>
                         </span>
                       </div>
                     </button>
 
-                    {/* Cột phải: Ô đích nhận mảnh ghép Puzzle + Nút xóa từng cặp nối */}
+                    {/* Cột phải: Ô đích nhận mảnh ghép Puzzle + hiệu ứng viền nét đứt phát sáng nhẹ */}
                     <div
                       onDragOver={(e) => {
                         if (readOnly) return;
@@ -840,33 +964,39 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                         setDragOverPairId(null);
                         setDraggedMatchText(null);
                       }}
-                      className={`lg:col-span-6 p-3.5 rounded-b-xl lg:rounded-xl border-2 transition-all flex flex-col justify-center gap-2 ${
+                      className={`lg:col-span-6 p-3.5 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-center gap-2 ${
                         showFeedback
                           ? pairCorrect
-                            ? 'border-emerald-600 bg-emerald-50/70'
-                            : 'border-rose-500 bg-rose-50/70'
+                            ? 'feedback-option-correct border-emerald-500/80 bg-emerald-50/75'
+                            : 'feedback-option-wrong border-rose-400/80 bg-rose-50/75'
                           : isDragOver
-                            ? 'border-teal-600 bg-sky-100/70 ring-2 ring-teal-500/40'
-                            : matchedRight
-                              ? 'border-teal-600 bg-teal-50/40'
-                              : 'border-dashed border-slate-300 bg-white'
+                            ? 'border-dashed border-teal-600 bg-teal-50/80 ring-4 ring-teal-500/20 scale-[1.01]'
+                            : isTargetWaitingHighlight
+                              ? 'border-dashed border-teal-500 bg-teal-50/40 ring-2 ring-teal-500/20 animate-pulse'
+                              : matchedRight
+                                ? 'border-teal-600/70 bg-teal-50/35 shadow-2xs'
+                                : 'border-dashed border-slate-300 bg-white hover:border-teal-500/60'
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <Link2
-                          className={`w-4 h-4 shrink-0 ${
-                            matchedRight ? 'text-teal-700' : 'text-slate-400'
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
+                            matchedRight
+                              ? 'bg-teal-100 text-teal-800'
+                              : 'bg-slate-100 text-slate-400'
                           }`}
-                        />
+                        >
+                          <Link2 className="w-4 h-4" />
+                        </span>
                         <select
                           aria-label={`Ghép nối cho: ${pair.left}`}
                           disabled={readOnly}
                           value={matchedRight}
                           onChange={(e) => handleAssignMatch(pair.id, e.target.value)}
-                          className="flex-1 px-3 py-2 text-sm font-semibold bg-white border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 cursor-pointer disabled:cursor-default"
+                          className="flex-1 min-w-0 w-full px-3 py-2 text-xs sm:text-sm font-semibold bg-white border border-slate-200/90 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 cursor-pointer disabled:cursor-default truncate"
                         >
                           <option value="">
-                            -- Kéo mảnh ghép thả vào đây hoặc chọn --
+                            -- Kéo mảnh ghép thả vào ô này hoặc chọn --
                           </option>
                           {rightChoices.map((choice) => (
                             <option key={choice} value={choice}>
@@ -875,16 +1005,17 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                           ))}
                         </select>
 
-                        {/* Nút xóa từng cặp nối để làm lại */}
+                        {/* Nút hủy nối từng cặp nhanh gọn mà không cần làm lại từ đầu */}
                         {!readOnly && matchedRight && (
                           <button
                             type="button"
                             onClick={() => handleClearSingleMatch(pair.id)}
                             aria-label={`Xóa cặp nối của ${pair.left}`}
-                            title="Gỡ mảnh ghép này để nối lại"
-                            className="p-2 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors shrink-0 cursor-pointer"
+                            title="Hủy nối cặp này"
+                            className="px-2.5 py-1.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-bold inline-flex items-center gap-1 transition-all duration-200 shrink-0 cursor-pointer"
                           >
-                            <X className="w-4 h-4" />
+                            <X className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Gỡ</span>
                           </button>
                         )}
                       </div>
@@ -892,12 +1023,14 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                       {showFeedback && (
                         <div className="text-xs px-1 flex items-center justify-between">
                           {pairCorrect ? (
-                            <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Ghép chính xác
+                            <span className="text-emerald-800 font-bold inline-flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>Ghép chính xác</span>
                             </span>
                           ) : (
-                            <span className="text-rose-700 font-semibold">
-                              Đáp án đúng: <strong className="underline">{expectedRight}</strong>
+                            <span className="text-rose-800 font-bold">
+                              Đáp án đúng:{' '}
+                              <strong className="underline text-emerald-800">{expectedRight}</strong>
                             </span>
                           )}
                         </div>
@@ -914,53 +1047,23 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
             DẠNG 4: SẮP XẾP THỨ TỰ (ORDERING — KÉO THẢ + NÚT LÊN/XUỐNG 1, 2, 3, 4...)
            ===================================================================== */}
         {question.type === 'ordering' && question.steps && (
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-700 bg-sky-50/90 border border-sky-200 px-4 py-3 rounded-xl">
-              <span>
-                <strong>Hướng dẫn Sắp xếp thứ tự (Ordering):</strong> Kéo thả (hoặc bấm chọn) các
-                thanh bước hành động sang khung trả lời đánh số{' '}
-                <strong>1 → {question.steps.length}</strong>, sau đó kéo đổi chỗ hoặc dùng nút{' '}
-                <strong>Lên / Xuống</strong>.
-              </span>
-              {!readOnly && (
-                <div className="flex items-center gap-2 shrink-0">
-                  {availablePoolSteps.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleAutoOrderAll}
-                      className="px-3 py-1.5 rounded-lg bg-teal-700 text-white text-xs font-semibold hover:bg-teal-800 whitespace-nowrap cursor-pointer"
-                    >
-                      Đưa nhanh tất cả sang khung xếp
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => onChangeAnswer([])}
-                    className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1 whitespace-nowrap cursor-pointer"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" /> Đặt lại thứ tự
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Cột trái: Các thanh bước hành động khả dụng */}
-              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-3">
+              <div className="border border-slate-200/90 rounded-2xl p-3.5 bg-slate-50/70 space-y-2.5">
                 <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>CÁC BƯỚC HÀNH ĐỘNG KHẢ DỤNG (KÉO HOẶC BẤM)</span>
+                  <span>CÁC BƯỚC KHẢ DỤNG (KÉO HOẶC BẤM CHỌN)</span>
                   <span className="font-mono tabular-nums text-slate-500">
                     Còn lại: {availablePoolSteps.length}
                   </span>
                 </div>
 
                 {availablePoolSteps.length === 0 ? (
-                  <div className="py-10 px-4 text-center text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl bg-white">
+                  <div className="py-8 px-3 text-center text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl bg-white">
                     Toàn bộ {question.steps.length} bước đã được đưa vào khung trả lời bên phải.
-                    Bạn có thể kéo thả hoặc bấm nút Lên/Xuống để tinh chỉnh thứ tự.
                   </div>
                 ) : (
-                  <div className="space-y-2.5">
+                  <div className="space-y-2">
                     {availablePoolSteps.map((step) => (
                       <div
                         key={step.id}
@@ -983,15 +1086,15 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                             handleAddStepToOrder(step.id);
                           }
                         }}
-                        className="w-full text-left px-4 py-3.5 rounded-xl border border-slate-300 bg-white hover:border-teal-600 hover:bg-sky-50/40 transition-all flex items-center justify-between gap-3 shadow-2xs cursor-grab active:cursor-grabbing select-none"
+                        className="w-full text-left px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white hover:border-teal-600 hover:bg-teal-50/30 transition-all duration-200 flex items-center justify-between gap-2.5 shadow-2xs cursor-grab active:cursor-grabbing select-none"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
                           <GripVertical className="w-4 h-4 text-slate-400 shrink-0" />
-                          <span className="text-sm font-medium text-slate-800">
+                          <span className={`${optionTextSizeClass} font-medium text-slate-800`}>
                             {step.text}
                           </span>
                         </div>
-                        <span className="text-xs font-semibold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-md whitespace-nowrap shrink-0">
+                        <span className="text-[11px] font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2.5 py-0.5 rounded-full whitespace-nowrap shrink-0">
                           + Bước {orderedStepIds.length + 1}
                         </span>
                       </div>
@@ -1001,15 +1104,15 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
               </div>
 
               {/* Cột phải: Khung trả lời đánh số 1, 2, 3, 4... */}
-              <div className="border border-slate-200 rounded-xl p-4 bg-white space-y-3">
+              <div className="border border-slate-200/90 rounded-2xl p-3.5 bg-white space-y-2.5">
                 <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>KHUNG TRẢ LỜI THEO THỨ TỰ QUY TRÌNH (1 → {question.steps.length})</span>
+                  <span>TRÌNH TỰ TRẢ LỜI (BƯỚC 1 → {question.steps.length})</span>
                   <span className="font-mono tabular-nums text-teal-800">
-                    Đã xếp: {orderedStepIds.length} / {question.steps.length}
+                    Đã xếp: {orderedStepIds.length}/{question.steps.length}
                   </span>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   {question.steps.map((_, slotIdx) => {
                     const stepId = orderedStepIds[slotIdx];
                     const stepObj = question.steps?.find((s) => s.id === stepId);
@@ -1047,17 +1150,17 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                           setDragOverSlotIndex(null);
                           setDraggedStepId(null);
                         }}
-                        className={`rounded-xl transition-all ${
-                          isDragOverSlot ? 'ring-2 ring-teal-600 bg-sky-50' : ''
+                        className={`rounded-xl transition-all duration-200 ${
+                          isDragOverSlot ? 'ring-2 ring-teal-600 bg-teal-50/40' : ''
                         }`}
                       >
                         {!stepObj ? (
-                          <div className="px-4 py-3.5 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/60 text-xs text-slate-400 flex items-center gap-3">
-                            <span className="w-7 h-7 rounded-lg bg-slate-200 text-slate-700 font-mono font-bold flex items-center justify-center tabular-nums">
+                          <div className="px-3.5 py-2.5 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/60 text-xs text-slate-400 flex items-center gap-3">
+                            <span className="w-6 h-6 rounded-lg bg-slate-200 text-slate-700 font-mono font-bold flex items-center justify-center tabular-nums">
                               {slotIdx + 1}
                             </span>
                             <span>
-                              Vị trí bước {slotIdx + 1} — Kéo bước thả vào đây hoặc bấm từ cột trái
+                              Vị trí bước {slotIdx + 1} — Kéo thả hoặc bấm chọn từ cột trái
                             </span>
                           </div>
                         ) : (
@@ -1071,23 +1174,31 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                               setDraggedStepId(null);
                               setDragOverSlotIndex(null);
                             }}
-                            className={`px-3.5 py-3 rounded-xl border-2 flex flex-col gap-1.5 ${
+                            className={`px-3.5 py-2.5 rounded-xl border-2 transition-all duration-200 flex flex-col gap-1.5 ${
                               readOnly ? '' : 'cursor-grab active:cursor-grabbing'
                             } ${
                               showFeedback
                                 ? isSlotCorrect
-                                  ? 'border-emerald-600 bg-emerald-50/70'
-                                  : 'border-rose-500 bg-rose-50/70'
-                                : 'border-teal-600/80 bg-teal-50/30'
+                                  ? 'feedback-option-correct border-emerald-500/80 bg-emerald-50/75'
+                                  : 'feedback-option-wrong border-rose-400/80 bg-rose-50/75'
+                                : 'border-teal-600/70 bg-teal-50/30'
                             }`}
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2.5 min-w-0">
-                                <GripVertical className="w-4 h-4 text-slate-400 shrink-0" />
-                                <span className="w-7 h-7 rounded-lg bg-teal-800 text-white text-xs font-mono font-bold flex items-center justify-center shrink-0 tabular-nums">
+                                <GripVertical className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span
+                                  className={`w-6 h-6 rounded-lg text-xs font-mono font-bold flex items-center justify-center shrink-0 tabular-nums ${
+                                    showFeedback
+                                      ? isSlotCorrect
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-rose-500 text-white'
+                                      : 'bg-teal-800 text-white'
+                                  }`}
+                                >
                                   {slotIdx + 1}
                                 </span>
-                                <span className="text-sm font-semibold text-slate-900">
+                                <span className={`${optionTextSizeClass} font-semibold text-slate-900`}>
                                   {stepObj.text}
                                 </span>
                               </div>
@@ -1125,9 +1236,11 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                             </div>
 
                             {showFeedback && !isSlotCorrect && expectedStepObj && (
-                              <div className="text-xs text-rose-800 font-medium pl-9">
+                              <div className="text-xs text-rose-800 font-medium pl-8">
                                 Đúng ở vị trí #{slotIdx + 1} phải là:{' '}
-                                <strong className="underline">{expectedStepObj.text}</strong>
+                                <strong className="underline text-emerald-800">
+                                  {expectedStepObj.text}
+                                </strong>
                               </div>
                             )}
                           </div>
@@ -1142,75 +1255,103 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
         )}
 
         {/* =====================================================================
-            KHUNG HIỂN THỊ KẾT QUẢ CHẤM CHUẨN CERTIPORT, ĐÁP ÁN ĐÚNG & GIẢI THÍCH
+            KHUNG GIẢI THÍCH & PHẢN HỒI ĐÁP ÁN (EXPLANATION PANEL 2 KHỐI TÁCH BIỆT)
+            - Xuất hiện mượt mà (slide-down & fade-in)
+            - Tối ưu màu sắc tinh tế: Khối Đáp án đúng (Check xanh ngọc) + Khối Giải thích bản chất (Lightbulb vàng hổ phách)
            ===================================================================== */}
         {showFeedback && (
           <div
             data-testid="question-feedback-box"
-            className={`p-5 rounded-xl border-2 space-y-4 ${
-              isCorrect
-                ? 'bg-emerald-50/80 border-emerald-500 text-emerald-950'
-                : 'bg-rose-50/80 border-rose-500 text-rose-950'
-            }`}
+            className="animate-feedback-reveal rounded-2xl border border-slate-200/90 bg-white shadow-sm overflow-hidden"
           >
-            {/* Thông báo trạng thái Chính xác! / Chưa chính xác */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 font-bold text-base">
+            {/* Dải trạng thái kết quả chấm ở đầu khung */}
+            <div
+              className={`px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2 ${
+                isCorrect
+                  ? 'feedback-banner-correct bg-emerald-50/85 border-emerald-200/90'
+                  : 'feedback-banner-wrong bg-rose-50/85 border-rose-200/90'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 font-bold text-sm">
                 {isCorrect ? (
                   <>
-                    <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0" />
-                    <span className="text-emerald-900">
-                      Chính xác! (Đạt 1 / 1 điểm chuẩn Certiport)
+                    <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                      <CheckCircle2 className="w-4 h-4" />
+                    </span>
+                    <span className="text-emerald-950">
+                      Chính xác tuyệt đối! Bạn đạt trọn vẹn điểm câu hỏi này
                     </span>
                   </>
                 ) : (
                   <>
-                    <XCircle className="w-6 h-6 text-rose-600 shrink-0" />
-                    <span className="text-rose-900">
-                      Chưa chính xác (0 / 1 điểm — Chuẩn Certiport yêu cầu đúng 100% các ý)
+                    <span className="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                      <XCircle className="w-4 h-4" />
+                    </span>
+                    <span className="text-rose-950">
+                      Chưa chính xác — Quy chuẩn Certiport yêu cầu đúng 100% tất cả các ý
                     </span>
                   </>
                 )}
               </div>
 
               <span
-                className={`text-xs font-mono font-bold px-2.5 py-1 rounded-md ${
+                className={`text-[11px] font-mono font-extrabold px-3 py-1 rounded-full tracking-wider whitespace-nowrap shrink-0 ${
                   isCorrect
                     ? 'bg-emerald-600 text-white'
-                    : 'bg-rose-600 text-white'
+                    : 'bg-rose-500 text-white'
                 }`}
               >
-                {isCorrect ? '+1 ĐIỂM' : '0 ĐIỂM'}
+                {isCorrect ? '+1 ĐIỂM CERTIPORT' : '0 ĐIỂM (CẦN ÔN LẠI)'}
               </span>
             </div>
 
-            {/* Khung chi tiết Đáp án đúng (chỉ rõ từng ý đúng) */}
-            <div className="bg-white/90 rounded-lg border border-slate-200 p-4 space-y-2">
-              <div className="text-xs font-bold uppercase tracking-wider text-teal-800 flex items-center gap-1.5">
-                <Bookmark className="w-3.5 h-3.5" />
-                <span>Đáp án đúng (Chi tiết từng ý chuẩn Certiport):</span>
+            {/* 2 Khối Tách Biệt: Khối Đáp Án Đúng (Check xanh) & Khối Giải Thích Bản Chất (Lightbulb vàng) */}
+            <div className="p-4 grid grid-cols-1 xl:grid-cols-12 gap-4 bg-slate-50/40">
+              {/* KHỐI 1: ĐÁP ÁN ĐÚNG CHUẨN CERTIPORT (ICON CHECK XANH NGỌC) */}
+              <div className="xl:col-span-5 feedback-block-correct rounded-xl border border-emerald-200 border-l-4 border-l-emerald-500 bg-emerald-50/65 p-4 space-y-2.5">
+                <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-emerald-900">
+                  <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                  </span>
+                  <span>Đáp án đúng chuẩn Certiport</span>
+                </div>
+
+                <div className="space-y-1.5">
+                  {correctBreakdown.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="text-xs bg-white border border-emerald-200/80 rounded-lg px-3 py-2 flex flex-wrap items-baseline justify-between gap-2 shadow-2xs"
+                    >
+                      <span className="font-semibold text-slate-600">{item.label}:</span>
+                      <span className="font-bold text-emerald-800">
+                        {item.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="grid grid-cols-1 gap-1.5">
-                {correctBreakdown.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="text-xs sm:text-sm text-slate-800 flex flex-wrap items-baseline justify-between gap-2 py-1 border-b border-slate-100 last:border-b-0"
-                  >
-                    <span className="font-medium text-slate-600">{item.label}:</span>
-                    <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded">
-                      {item.value}
+
+              {/* KHỐI 2: GIẢI THÍCH BẢN CHẤT CỐT LÕI (ICON LIGHTBULB VÀNG HỔ PHÁCH) */}
+              <div className="xl:col-span-7 feedback-block-explanation rounded-xl border border-amber-200 border-l-4 border-l-amber-500 bg-amber-50/65 p-4 flex flex-col justify-between space-y-2.5">
+                <div className="space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-amber-900">
+                      <span className="w-6 h-6 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                        <Lightbulb className="w-3.5 h-3.5" />
+                      </span>
+                      <span>Giải thích bản chất & Ghi nhớ nhanh</span>
+                    </div>
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-100/90 border border-amber-200/80 px-2.5 py-0.5 rounded-full whitespace-nowrap shrink-0">
+                      <Sparkles className="w-3 h-3 text-amber-600 shrink-0" />
+                      <span>Cốt lõi 3 giây</span>
                     </span>
                   </div>
-                ))}
-              </div>
-            </div>
 
-            {/* Giải thích ngắn gọn */}
-            <div className="text-sm text-slate-800 leading-relaxed pt-1 flex items-start gap-2.5">
-              <HelpCircle className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold text-slate-900">Giải thích ngắn gọn: </span>
-                <span>{question.explanation}</span>
+                  <p className="text-xs sm:text-sm text-slate-800 leading-relaxed font-medium pl-1">
+                    {question.explanation ||
+                      'Nắm vững từ khóa trong ngữ cảnh câu hỏi và đối chiếu trực tiếp với nguyên tắc an toàn, chính xác của mô hình Generative AI.'}
+                  </p>
+                </div>
               </div>
             </div>
           </div>

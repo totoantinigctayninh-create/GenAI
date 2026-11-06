@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { LoginScreen } from './components/LoginScreen';
 import { StudentPortal } from './components/StudentPortal';
 import { TeacherPortal } from './components/TeacherPortal';
+import { ThemeProvider } from './context/ThemeContext';
 import { SEED_ATTEMPTS, SEED_QUESTIONS, SEED_USERS } from './data/seedData';
 import {
   authenticateWithUsernamePassword,
@@ -26,6 +27,7 @@ import {
   syncExamWrongQuestionsToFirestore,
   testFirestoreConnection,
   toggleQuestionBookmarkInFirestore,
+  updateDepartmentLogoInFirestore,
   updateStudentPasswordInFirestore,
   updateUserActivityAndStudyTime,
 } from './services/firebase';
@@ -36,6 +38,7 @@ const SESSION_STORAGE_KEY = 'certiport_genai_active_user_id_v3';
 const USERS_CACHE_KEY = 'certiport_genai_users_cache_v3';
 const QUESTIONS_CACHE_KEY = 'certiport_genai_questions_cache_v3';
 const ATTEMPTS_CACHE_KEY = 'certiport_genai_attempts_cache_v3';
+const DEPARTMENT_LOGO_CACHE_KEY = 'igc_toantin_logo_url_v1';
 
 // Dọn sạch bộ nhớ đệm cũ có chứa dữ liệu ảo (v1/v2)
 try {
@@ -87,6 +90,13 @@ export default function App() {
 
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [departmentLogoUrl, setDepartmentLogoUrl] = useState<string | undefined>(() => {
+    try {
+      return localStorage.getItem(DEPARTMENT_LOGO_CACHE_KEY) || undefined;
+    } catch {
+      return undefined;
+    }
+  });
 
   // Lưu bộ đệm cục bộ mỗi khi state thay đổi để đảm bảo phản hồi tức thì cả khi mạng chậm
   useEffect(() => {
@@ -140,7 +150,21 @@ export default function App() {
             practiceProgress: lu.practiceProgress ?? {},
           });
         }
-        setUsers(Array.from(mergedMap.values()));
+        const mergedList = Array.from(mergedMap.values());
+        setUsers(mergedList);
+        const adminDoc = mergedList.find((u) => u.id === 'admin');
+        if (adminDoc && typeof adminDoc.logoUrl === 'string') {
+          setDepartmentLogoUrl(adminDoc.logoUrl || undefined);
+          try {
+            if (adminDoc.logoUrl) {
+              localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, adminDoc.logoUrl);
+            } else {
+              localStorage.removeItem(DEPARTMENT_LOGO_CACHE_KEY);
+            }
+          } catch {
+            // Bỏ qua
+          }
+        }
       });
 
       unsubQuestions = subscribeToQuestions((liveQuestions) => {
@@ -234,7 +258,13 @@ export default function App() {
 
   const handleSyncStudyTime = useCallback(
     async (additionalSeconds: number) => {
-      if (!activeUserId || activeUserId.toLowerCase() === 'admin') return;
+      if (
+        !activeUserId ||
+        activeUserId.toLowerCase() === 'admin' ||
+        currentUser?.role === 'teacher'
+      ) {
+        return;
+      }
       setUsers((prev) =>
         prev.map((u) => {
           if (u.id.toLowerCase() !== activeUserId.toLowerCase()) return u;
@@ -253,8 +283,26 @@ export default function App() {
         additionalSeconds
       );
     },
-    [activeUserId]
+    [activeUserId, currentUser]
   );
+
+  const handleUpdateDepartmentLogo = useCallback(async (logoUrl: string) => {
+    const cleaned = logoUrl.trim();
+    setDepartmentLogoUrl(cleaned || undefined);
+    try {
+      if (cleaned) {
+        localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, cleaned);
+      } else {
+        localStorage.removeItem(DEPARTMENT_LOGO_CACHE_KEY);
+      }
+    } catch {
+      // Bỏ qua
+    }
+    setUsers((prev) =>
+      prev.map((u) => (u.id === 'admin' ? { ...u, logoUrl: cleaned } : u))
+    );
+    await updateDepartmentLogoInFirestore(cleaned);
+  }, []);
 
   // Optimistic + Firestore sync cho Bookmark
   const handleToggleBookmark = useCallback(
@@ -502,50 +550,51 @@ export default function App() {
     await resetSeedDataToDefault();
   }, []);
 
-  if (!currentUser) {
-    return (
-      <LoginScreen
-        onLogin={handleLogin}
-        isLoading={isAuthenticating}
-        errorMessage={loginError}
-        seededUsers={users}
-        questionsCount={questions.length}
-      />
-    );
-  }
-
-  if (currentUser.role === 'teacher') {
-    return (
-      <TeacherPortal
-        currentUser={currentUser}
-        users={users}
-        questions={questions}
-        attempts={attempts}
-        onLogout={handleLogout}
-        onSaveStudent={handleSaveStudent}
-        onBatchSaveStudents={handleBatchSaveStudents}
-        onUpdateStudentPassword={handleUpdateStudentPassword}
-        onResetStudentProgress={handleResetStudentProgress}
-        onDeleteStudent={handleDeleteStudent}
-        onSaveQuestion={handleSaveQuestion}
-        onDeleteQuestion={handleDeleteQuestion}
-        onBatchSaveQuestions={handleBatchSaveQuestions}
-        onResetSeedData={handleResetSeedData}
-      />
-    );
-  }
-
   return (
-    <StudentPortal
-      currentUser={currentUser}
-      questions={questions}
-      attempts={attempts}
-      onLogout={handleLogout}
-      onSaveAttempt={handleSaveAttempt}
-      onSyncStudyTime={handleSyncStudyTime}
-      onToggleBookmark={handleToggleBookmark}
-      onRecordPracticeCheck={handleRecordPracticeCheck}
-      onMarkQuestionMastered={handleMarkQuestionMastered}
-    />
+    <ThemeProvider>
+      {!currentUser ? (
+        <LoginScreen
+          onLogin={handleLogin}
+          isLoading={isAuthenticating}
+          errorMessage={loginError}
+          seededUsers={users}
+          questionsCount={questions.length}
+          departmentLogoUrl={departmentLogoUrl}
+          onUpdateDepartmentLogo={handleUpdateDepartmentLogo}
+        />
+      ) : currentUser.role === 'teacher' ? (
+        <TeacherPortal
+          currentUser={currentUser}
+          users={users}
+          questions={questions}
+          attempts={attempts}
+          departmentLogoUrl={departmentLogoUrl}
+          onUpdateDepartmentLogo={handleUpdateDepartmentLogo}
+          onLogout={handleLogout}
+          onSaveStudent={handleSaveStudent}
+          onBatchSaveStudents={handleBatchSaveStudents}
+          onUpdateStudentPassword={handleUpdateStudentPassword}
+          onResetStudentProgress={handleResetStudentProgress}
+          onDeleteStudent={handleDeleteStudent}
+          onSaveQuestion={handleSaveQuestion}
+          onDeleteQuestion={handleDeleteQuestion}
+          onBatchSaveQuestions={handleBatchSaveQuestions}
+          onResetSeedData={handleResetSeedData}
+        />
+      ) : (
+        <StudentPortal
+          currentUser={currentUser}
+          questions={questions}
+          attempts={attempts}
+          departmentLogoUrl={departmentLogoUrl}
+          onLogout={handleLogout}
+          onSaveAttempt={handleSaveAttempt}
+          onSyncStudyTime={handleSyncStudyTime}
+          onToggleBookmark={handleToggleBookmark}
+          onRecordPracticeCheck={handleRecordPracticeCheck}
+          onMarkQuestionMastered={handleMarkQuestionMastered}
+        />
+      )}
+    </ThemeProvider>
   );
 }
