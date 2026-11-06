@@ -1281,20 +1281,6 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     )}
                   </button>
 
-                  {/* Nút Ẩn/Hiện Sidebar bên trái để Tập trung 100% */}
-                  <button
-                    type="button"
-                    data-testid="toggle-zen-header-btn"
-                    onClick={() => setIsZenHeaderHidden((prev) => !prev)}
-                    className={`px-2 py-1 rounded-md border text-[11px] font-semibold transition-colors cursor-pointer ${
-                      isZenHeaderHidden
-                        ? 'border-teal-600 bg-teal-50 text-teal-900'
-                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    {isZenHeaderHidden ? 'Hiện sidebar' : 'Ẩn sidebar'}
-                  </button>
-
                   {/* Nút Mở lại Hộp thoại Chọn Số câu & Thời gian */}
                   <button
                     type="button"

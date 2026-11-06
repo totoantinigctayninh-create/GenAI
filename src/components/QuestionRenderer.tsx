@@ -6,8 +6,6 @@ import {
   CheckCircle2,
   GripVertical,
   Lightbulb,
-  Link2,
-  Puzzle,
   RotateCcw,
   Sparkles,
   Star,
@@ -751,28 +749,22 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
         )}
 
         {/* =====================================================================
-            DẠNG 3: KÉO THẢ NỐI MẢNH GHÉP (PUZZLE MATCHING NÂNG CẤP TRỰC QUAN)
-            - Phân biệt rõ mảnh chưa ghép & đã ghép
-            - Ô đích phát sáng nét đứt (dashed pulse) khi đang kéo hoặc chọn thẻ trái
-            - Có nút hủy nối từng cặp nhanh gọn
+            DẠNG 3: KÉO THẢ NỐI CÂU (PUZZLE MATCHING — THUẦN KÉO THẢ GỌN GÀNG, KHÔNG DÙNG DROPDOWN SELECT)
+            - Bố cục 2 cột ngang chuẩn Certiport: Cột trái (Kho thẻ kéo) · Cột phải (Mệnh đề & Ô thả)
+            - Tiết kiệm tối đa diện tích dọc, thao tác Kéo-Thả hoặc Chạm-Thả trực tiếp
            ===================================================================== */}
         {question.type === 'matching' && question.pairs && (
-          <div className="space-y-4">
-            {/* Kho mảnh ghép nguồn để kéo thả hoặc bấm chọn nhanh */}
-            <div className="p-4 bg-slate-50/90 rounded-2xl border border-slate-200/90 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                  <Puzzle className="w-4 h-4 text-teal-700" />
-                  <span>Kho mảnh ghép trả lời (Kéo thả vào ô đích hoặc bấm chọn):</span>
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+            {/* Cột trái (5/12): Kho thẻ nguồn để kéo sang phải */}
+            <div className="md:col-span-5 p-3 bg-slate-50/90 rounded-xl border border-slate-200/90 space-y-2">
+              <div className="flex items-center justify-between gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                <span>Kho mảnh ghép (Kéo sang ô phải)</span>
+                <span className="font-mono text-teal-800">
+                  Còn {Math.max(0, rightChoices.length - matchedPairCount)}/{rightChoices.length}
                 </span>
-                {selectedLeftPairId && (
-                  <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold text-[11px] animate-pulse">
-                    Đang chọn mệnh đề trái — Hãy bấm vào 1 mảnh ghép bên dưới để khớp nối!
-                  </span>
-                )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="space-y-1.5">
                 {rightChoices.map((rightText) => {
                   const currentMap =
                     userAnswer && typeof userAnswer === 'object' && !Array.isArray(userAnswer)
@@ -820,34 +812,21 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                           }
                         }
                       }}
-                      className={`px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-medium border transition-all duration-200 flex items-center justify-between gap-2.5 select-none ${
+                      className={`px-2.5 py-2 rounded-lg text-xs sm:text-[13px] border transition-all duration-150 flex items-center justify-between gap-2 select-none ${
                         readOnly ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
                       } ${
                         isUsed
-                          ? 'bg-teal-50/70 border-teal-500/60 text-teal-950 shadow-none'
-                          : 'bg-white border-slate-300 text-slate-800 hover:border-teal-600 hover:shadow-sm shadow-2xs'
+                          ? 'bg-slate-100/80 border-dashed border-slate-300 text-slate-400 opacity-60'
+                          : 'bg-white border-slate-300 text-slate-800 font-medium hover:border-teal-600 hover:bg-teal-50/30 shadow-2xs'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <GripVertical className="w-4 h-4 text-slate-400 shrink-0" />
-                        <span
-                          className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
-                            isUsed
-                              ? 'bg-teal-700 text-white'
-                              : 'bg-slate-100 text-teal-700'
-                          }`}
-                        >
-                          <Puzzle className="w-3.5 h-3.5" />
-                        </span>
-                        <span className="leading-snug font-medium">{rightText}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <GripVertical className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="leading-snug">{rightText}</span>
                       </div>
-                      {isUsed ? (
-                        <span className="text-[11px] font-mono font-bold bg-teal-700 text-white px-2.5 py-0.5 rounded-full shrink-0">
-                          Đã nối #{matchedLeftIndex + 1}
-                        </span>
-                      ) : (
-                        <span className="text-[11px] font-semibold text-slate-400 shrink-0 hidden sm:inline">
-                          Chưa ghép
+                      {isUsed && (
+                        <span className="text-[10px] font-mono font-bold bg-teal-700 text-white px-1.5 py-0.5 rounded shrink-0">
+                          #{matchedLeftIndex + 1}
                         </span>
                       )}
                     </div>
@@ -856,15 +835,8 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
               </div>
             </div>
 
-            {/* Bảng 2 Cột Mảnh Ghép (Cột Trái có khớp nối bo cong tinh xảo -> Cột Phải nhận mảnh ghép) */}
-            <div className="space-y-3">
-              <div className="hidden lg:grid lg:grid-cols-12 gap-4 px-2 text-xs font-bold uppercase tracking-wider text-slate-500">
-                <div className="lg:col-span-6">Mảnh ghép Trái (Mệnh đề gốc)</div>
-                <div className="lg:col-span-6">
-                  Ô gắn mảnh ghép Phải (Kéo thả hoặc Chọn)
-                </div>
-              </div>
-
+            {/* Cột phải (7/12): Danh sách các hàng Mệnh đề gốc & Ô thả mảnh ghép (Thuần Drag & Drop, không có Dropdown Select) */}
+            <div className="md:col-span-7 space-y-2">
               {question.pairs.map((pair, idx) => {
                 const currentMap =
                   userAnswer && typeof userAnswer === 'object' && !Array.isArray(userAnswer)
@@ -884,65 +856,38 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                 return (
                   <div
                     key={pair.id}
-                    className="grid grid-cols-1 lg:grid-cols-12 gap-2 lg:gap-3 items-stretch"
+                    className="p-2.5 rounded-xl border border-slate-200/90 bg-slate-50/50 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center"
                   >
-                    {/* Cột trái: Thẻ gốc có khớp nối Puzzle bo cong tinh xảo */}
+                    {/* Nửa trái: Mệnh đề gốc */}
                     <button
                       type="button"
                       disabled={readOnly}
                       onClick={() =>
                         setSelectedLeftPairId(isSelectedLeft ? null : pair.id)
                       }
-                      className={`lg:col-span-6 relative p-4 rounded-2xl border text-left transition-all duration-200 flex items-center justify-between gap-3 cursor-pointer disabled:cursor-default ${
-                        isSelectedLeft
-                          ? 'border-teal-600 bg-teal-50/70 ring-2 ring-teal-500/30 shadow-xs'
-                          : matchedRight
-                            ? 'border-teal-600/60 bg-teal-50/30'
-                            : 'border-slate-200/90 bg-slate-50/80 hover:bg-white hover:border-slate-300'
+                      className={`sm:col-span-6 text-left flex items-start gap-2 pr-1 rounded-lg transition-colors cursor-pointer disabled:cursor-default ${
+                        isSelectedLeft ? 'text-teal-900' : 'text-slate-900'
                       }`}
                     >
-                      <div className="flex items-start gap-3 pr-2">
-                        <span
-                          className={`w-7 h-7 rounded-xl text-xs font-mono font-bold flex items-center justify-center shrink-0 tabular-nums mt-0.5 shadow-2xs ${
-                            matchedRight
-                              ? 'bg-teal-700 text-white'
-                              : isSelectedLeft
-                                ? 'bg-amber-500 text-white'
-                                : 'bg-slate-800 text-white'
-                          }`}
-                        >
-                          #{idx + 1}
-                        </span>
-                        <span className={`${optionTextSizeClass} font-semibold text-slate-900`}>
-                          {pair.left}
-                        </span>
-                      </div>
-
-                      {/* Khớp nối mảnh ghép bo cong tinh xảo (Puzzle Interlock Tab) */}
-                      <div className="flex items-center shrink-0">
-                        <span
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold inline-flex items-center gap-1 transition-all duration-200 ${
-                            matchedRight
-                              ? 'bg-teal-700 text-white shadow-2xs'
-                              : isSelectedLeft
-                                ? 'bg-amber-500 text-white animate-pulse'
-                                : 'bg-slate-200/90 text-slate-600'
-                          }`}
-                        >
-                          <Puzzle className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">
-                            {matchedRight
-                              ? 'Đã khớp'
-                              : isSelectedLeft
-                                ? 'Đang chọn...'
-                                : 'Chưa ghép'}
-                          </span>
-                        </span>
-                      </div>
+                      <span
+                        className={`w-5 h-5 rounded-md text-[11px] font-mono font-bold flex items-center justify-center shrink-0 tabular-nums mt-0.5 ${
+                          matchedRight
+                            ? 'bg-teal-700 text-white'
+                            : isSelectedLeft
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        {idx + 1}
+                      </span>
+                      <span className="text-xs sm:text-[13px] font-semibold leading-snug">
+                        {pair.left}
+                      </span>
                     </button>
 
-                    {/* Cột phải: Ô đích nhận mảnh ghép Puzzle + hiệu ứng viền nét đứt phát sáng nhẹ */}
+                    {/* Nửa phải: Ô thả mảnh ghép trực tiếp (Drop Zone) */}
                     <div
+                      aria-label={`Ô thả ghép nối cho: ${pair.left}`}
                       onDragOver={(e) => {
                         if (readOnly) return;
                         e.preventDefault();
@@ -964,73 +909,78 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                         setDragOverPairId(null);
                         setDraggedMatchText(null);
                       }}
-                      className={`lg:col-span-6 p-3.5 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-center gap-2 ${
+                      onClick={() => {
+                        if (readOnly) return;
+                        setSelectedLeftPairId(isSelectedLeft ? null : pair.id);
+                      }}
+                      className={`sm:col-span-6 min-h-[38px] px-2.5 py-1.5 rounded-lg border-2 transition-all duration-150 flex flex-col justify-center gap-1 ${
                         showFeedback
                           ? pairCorrect
-                            ? 'feedback-option-correct border-emerald-500/80 bg-emerald-50/75'
-                            : 'feedback-option-wrong border-rose-400/80 bg-rose-50/75'
+                            ? 'feedback-option-correct border-emerald-500 bg-emerald-50/80'
+                            : 'feedback-option-wrong border-rose-400 bg-rose-50/80'
                           : isDragOver
-                            ? 'border-dashed border-teal-600 bg-teal-50/80 ring-4 ring-teal-500/20 scale-[1.01]'
+                            ? 'border-dashed border-teal-600 bg-teal-50/90 ring-2 ring-teal-500/25'
                             : isTargetWaitingHighlight
-                              ? 'border-dashed border-teal-500 bg-teal-50/40 ring-2 ring-teal-500/20 animate-pulse'
+                              ? 'border-dashed border-teal-500 bg-teal-50/40 animate-pulse'
                               : matchedRight
-                                ? 'border-teal-600/70 bg-teal-50/35 shadow-2xs'
-                                : 'border-dashed border-slate-300 bg-white hover:border-teal-500/60'
+                                ? 'border-teal-600/80 bg-white shadow-2xs'
+                                : 'border-dashed border-slate-300 bg-white hover:border-teal-500/70 cursor-pointer'
                       }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
-                            matchedRight
-                              ? 'bg-teal-100 text-teal-800'
-                              : 'bg-slate-100 text-slate-400'
-                          }`}
+                      {matchedRight ? (
+                        <div
+                          draggable={!readOnly}
+                          onDragStart={(e) => {
+                            setDraggedMatchText(matchedRight);
+                            e.dataTransfer.setData('text/plain', matchedRight);
+                          }}
+                          onDragEnd={() => {
+                            setDraggedMatchText(null);
+                            setDragOverPairId(null);
+                          }}
+                          className="flex items-center justify-between gap-1.5 min-w-0"
                         >
-                          <Link2 className="w-4 h-4" />
-                        </span>
-                        <select
-                          aria-label={`Ghép nối cho: ${pair.left}`}
-                          disabled={readOnly}
-                          value={matchedRight}
-                          onChange={(e) => handleAssignMatch(pair.id, e.target.value)}
-                          className="flex-1 min-w-0 w-full px-3 py-2 text-xs sm:text-sm font-semibold bg-white border border-slate-200/90 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 cursor-pointer disabled:cursor-default truncate"
-                        >
-                          <option value="">
-                            -- Kéo mảnh ghép thả vào ô này hoặc chọn --
-                          </option>
-                          {rightChoices.map((choice) => (
-                            <option key={choice} value={choice}>
-                              {choice}
-                            </option>
-                          ))}
-                        </select>
-
-                        {/* Nút hủy nối từng cặp nhanh gọn mà không cần làm lại từ đầu */}
-                        {!readOnly && matchedRight && (
-                          <button
-                            type="button"
-                            onClick={() => handleClearSingleMatch(pair.id)}
-                            aria-label={`Xóa cặp nối của ${pair.left}`}
-                            title="Hủy nối cặp này"
-                            className="px-2.5 py-1.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-bold inline-flex items-center gap-1 transition-all duration-200 shrink-0 cursor-pointer"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">Gỡ</span>
-                          </button>
-                        )}
-                      </div>
+                          <span className="text-xs sm:text-[13px] font-semibold text-teal-950 leading-snug">
+                            {matchedRight}
+                          </span>
+                          {!readOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleClearSingleMatch(pair.id);
+                              }}
+                              aria-label={`Xóa cặp nối của ${pair.left}`}
+                              title="Gỡ mảnh ghép này"
+                              className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-400 flex items-center justify-center gap-1.5 py-0.5 select-none">
+                          <span>
+                            {isSelectedLeft
+                              ? 'Bấm chọn 1 mảnh bên trái để điền vào đây'
+                              : 'Kéo thả mảnh ghép vào ô này'}
+                          </span>
+                        </div>
+                      )}
 
                       {showFeedback && (
-                        <div className="text-xs px-1 flex items-center justify-between">
+                        <div className="text-[11px] pt-0.5 border-t border-slate-200/60 flex items-center justify-between">
                           {pairCorrect ? (
                             <span className="text-emerald-800 font-bold inline-flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span>Ghép chính xác</span>
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                              <span>Chính xác</span>
                             </span>
                           ) : (
                             <span className="text-rose-800 font-bold">
-                              Đáp án đúng:{' '}
-                              <strong className="underline text-emerald-800">{expectedRight}</strong>
+                              Đúng:{' '}
+                              <strong className="underline text-emerald-800">
+                                {expectedRight}
+                              </strong>
                             </span>
                           )}
                         </div>
@@ -1044,211 +994,207 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
         )}
 
         {/* =====================================================================
-            DẠNG 4: SẮP XẾP THỨ TỰ (ORDERING — KÉO THẢ + NÚT LÊN/XUỐNG 1, 2, 3, 4...)
+            DẠNG 4: SẮP XẾP THỨ TỰ (ORDERING — KÉO THẢ GỌN GÀNG 2 CỘT)
            ===================================================================== */}
         {question.type === 'ordering' && question.steps && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Cột trái: Các thanh bước hành động khả dụng */}
-              <div className="border border-slate-200/90 rounded-2xl p-3.5 bg-slate-50/70 space-y-2.5">
-                <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>CÁC BƯỚC KHẢ DỤNG (KÉO HOẶC BẤM CHỌN)</span>
-                  <span className="font-mono tabular-nums text-slate-500">
-                    Còn lại: {availablePoolSteps.length}
-                  </span>
-                </div>
-
-                {availablePoolSteps.length === 0 ? (
-                  <div className="py-8 px-3 text-center text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl bg-white">
-                    Toàn bộ {question.steps.length} bước đã được đưa vào khung trả lời bên phải.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {availablePoolSteps.map((step) => (
-                      <div
-                        key={step.id}
-                        draggable={!readOnly}
-                        onDragStart={(e) => {
-                          setDraggedStepId(step.id);
-                          e.dataTransfer.setData('text/plain', step.id);
-                        }}
-                        onDragEnd={() => {
-                          setDraggedStepId(null);
-                          setDragOverSlotIndex(null);
-                        }}
-                        onClick={() => handleAddStepToOrder(step.id)}
-                        role="button"
-                        tabIndex={readOnly ? -1 : 0}
-                        onKeyDown={(e) => {
-                          if (readOnly) return;
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            handleAddStepToOrder(step.id);
-                          }
-                        }}
-                        className="w-full text-left px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white hover:border-teal-600 hover:bg-teal-50/30 transition-all duration-200 flex items-center justify-between gap-2.5 shadow-2xs cursor-grab active:cursor-grabbing select-none"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <GripVertical className="w-4 h-4 text-slate-400 shrink-0" />
-                          <span className={`${optionTextSizeClass} font-medium text-slate-800`}>
-                            {step.text}
-                          </span>
-                        </div>
-                        <span className="text-[11px] font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2.5 py-0.5 rounded-full whitespace-nowrap shrink-0">
-                          + Bước {orderedStepIds.length + 1}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+            {/* Cột trái: Các bước khả dụng */}
+            <div className="border border-slate-200/90 rounded-xl p-3 bg-slate-50/80 space-y-2">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center justify-between">
+                <span>Các bước khả dụng (Kéo sang phải)</span>
+                <span className="font-mono tabular-nums text-slate-500">
+                  Còn {availablePoolSteps.length}
+                </span>
               </div>
 
-              {/* Cột phải: Khung trả lời đánh số 1, 2, 3, 4... */}
-              <div className="border border-slate-200/90 rounded-2xl p-3.5 bg-white space-y-2.5">
-                <div className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>TRÌNH TỰ TRẢ LỜI (BƯỚC 1 → {question.steps.length})</span>
-                  <span className="font-mono tabular-nums text-teal-800">
-                    Đã xếp: {orderedStepIds.length}/{question.steps.length}
-                  </span>
+              {availablePoolSteps.length === 0 ? (
+                <div className="py-5 px-3 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg bg-white">
+                  Đã đưa hết {question.steps.length} bước sang khung trả lời.
                 </div>
-
-                <div className="space-y-2">
-                  {question.steps.map((_, slotIdx) => {
-                    const stepId = orderedStepIds[slotIdx];
-                    const stepObj = question.steps?.find((s) => s.id === stepId);
-                    const expectedArr = Array.isArray(question.correctAnswer)
-                      ? question.correctAnswer
-                      : [];
-                    const expectedStepId = expectedArr[slotIdx];
-                    const expectedStepObj = question.steps?.find(
-                      (s) => s.id === expectedStepId
-                    );
-                    const isSlotCorrect = showFeedback && stepId === expectedStepId;
-                    const isDragOverSlot = dragOverSlotIndex === slotIdx;
-
-                    return (
-                      <div
-                        key={`slot-${slotIdx}`}
-                        onDragOver={(e) => {
-                          if (readOnly) return;
+              ) : (
+                <div className="space-y-1.5">
+                  {availablePoolSteps.map((step) => (
+                    <div
+                      key={step.id}
+                      draggable={!readOnly}
+                      onDragStart={(e) => {
+                        setDraggedStepId(step.id);
+                        e.dataTransfer.setData('text/plain', step.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedStepId(null);
+                        setDragOverSlotIndex(null);
+                      }}
+                      onClick={() => handleAddStepToOrder(step.id)}
+                      role="button"
+                      tabIndex={readOnly ? -1 : 0}
+                      onKeyDown={(e) => {
+                        if (readOnly) return;
+                        if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
-                          setDragOverSlotIndex(slotIdx);
-                        }}
-                        onDragLeave={() => {
-                          if (dragOverSlotIndex === slotIdx) {
-                            setDragOverSlotIndex(null);
-                          }
-                        }}
-                        onDrop={(e) => {
-                          if (readOnly) return;
-                          e.preventDefault();
-                          const droppedId =
-                            draggedStepId || e.dataTransfer.getData('text/plain');
-                          if (droppedId) {
-                            handleDropStepAtSlot(droppedId, slotIdx);
-                          }
+                          handleAddStepToOrder(step.id);
+                        }
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg border border-slate-300 bg-white hover:border-teal-600 hover:bg-teal-50/30 transition-all duration-150 flex items-center justify-between gap-2 shadow-2xs cursor-grab active:cursor-grabbing select-none"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <GripVertical className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="text-xs sm:text-[13px] font-medium text-slate-800 leading-snug">
+                          {step.text}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded whitespace-nowrap shrink-0">
+                        + Bước {orderedStepIds.length + 1}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Cột phải: Khung trả lời đánh số 1, 2, 3, 4... */}
+            <div className="border border-slate-200/90 rounded-xl p-3 bg-white space-y-2">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-600 flex items-center justify-between">
+                <span>Trình tự trả lời (Bước 1 → {question.steps.length})</span>
+                <span className="font-mono tabular-nums text-teal-800">
+                  {orderedStepIds.length}/{question.steps.length}
+                </span>
+              </div>
+
+              <div className="space-y-1.5">
+                {question.steps.map((_, slotIdx) => {
+                  const stepId = orderedStepIds[slotIdx];
+                  const stepObj = question.steps?.find((s) => s.id === stepId);
+                  const expectedArr = Array.isArray(question.correctAnswer)
+                    ? question.correctAnswer
+                    : [];
+                  const expectedStepId = expectedArr[slotIdx];
+                  const expectedStepObj = question.steps?.find(
+                    (s) => s.id === expectedStepId
+                  );
+                  const isSlotCorrect = showFeedback && stepId === expectedStepId;
+                  const isDragOverSlot = dragOverSlotIndex === slotIdx;
+
+                  return (
+                    <div
+                      key={`slot-${slotIdx}`}
+                      onDragOver={(e) => {
+                        if (readOnly) return;
+                        e.preventDefault();
+                        setDragOverSlotIndex(slotIdx);
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverSlotIndex === slotIdx) {
                           setDragOverSlotIndex(null);
-                          setDraggedStepId(null);
-                        }}
-                        className={`rounded-xl transition-all duration-200 ${
-                          isDragOverSlot ? 'ring-2 ring-teal-600 bg-teal-50/40' : ''
-                        }`}
-                      >
-                        {!stepObj ? (
-                          <div className="px-3.5 py-2.5 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/60 text-xs text-slate-400 flex items-center gap-3">
-                            <span className="w-6 h-6 rounded-lg bg-slate-200 text-slate-700 font-mono font-bold flex items-center justify-center tabular-nums">
-                              {slotIdx + 1}
-                            </span>
-                            <span>
-                              Vị trí bước {slotIdx + 1} — Kéo thả hoặc bấm chọn từ cột trái
-                            </span>
-                          </div>
-                        ) : (
-                          <div
-                            draggable={!readOnly}
-                            onDragStart={(e) => {
-                              setDraggedStepId(stepObj.id);
-                              e.dataTransfer.setData('text/plain', stepObj.id);
-                            }}
-                            onDragEnd={() => {
-                              setDraggedStepId(null);
-                              setDragOverSlotIndex(null);
-                            }}
-                            className={`px-3.5 py-2.5 rounded-xl border-2 transition-all duration-200 flex flex-col gap-1.5 ${
-                              readOnly ? '' : 'cursor-grab active:cursor-grabbing'
-                            } ${
-                              showFeedback
-                                ? isSlotCorrect
-                                  ? 'feedback-option-correct border-emerald-500/80 bg-emerald-50/75'
-                                  : 'feedback-option-wrong border-rose-400/80 bg-rose-50/75'
-                                : 'border-teal-600/70 bg-teal-50/30'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <GripVertical className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span
-                                  className={`w-6 h-6 rounded-lg text-xs font-mono font-bold flex items-center justify-center shrink-0 tabular-nums ${
-                                    showFeedback
-                                      ? isSlotCorrect
-                                        ? 'bg-emerald-600 text-white'
-                                        : 'bg-rose-500 text-white'
-                                      : 'bg-teal-800 text-white'
-                                  }`}
-                                >
-                                  {slotIdx + 1}
-                                </span>
-                                <span className={`${optionTextSizeClass} font-semibold text-slate-900`}>
-                                  {stepObj.text}
-                                </span>
-                              </div>
-
-                              {!readOnly && (
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button
-                                    type="button"
-                                    aria-label={`Di chuyển bước ${slotIdx + 1} lên`}
-                                    disabled={slotIdx === 0}
-                                    onClick={() => handleMoveOrderedStep(slotIdx, -1)}
-                                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
-                                  >
-                                    <ArrowUp className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    aria-label={`Di chuyển bước ${slotIdx + 1} xuống`}
-                                    disabled={slotIdx === orderedStepIds.length - 1}
-                                    onClick={() => handleMoveOrderedStep(slotIdx, 1)}
-                                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
-                                  >
-                                    <ArrowDown className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    aria-label={`Gỡ bước ${stepObj.text}`}
-                                    onClick={() => handleRemoveStepFromOrder(stepObj.id)}
-                                    className="p-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 cursor-pointer"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              )}
+                        }
+                      }}
+                      onDrop={(e) => {
+                        if (readOnly) return;
+                        e.preventDefault();
+                        const droppedId =
+                          draggedStepId || e.dataTransfer.getData('text/plain');
+                        if (droppedId) {
+                          handleDropStepAtSlot(droppedId, slotIdx);
+                        }
+                        setDragOverSlotIndex(null);
+                        setDraggedStepId(null);
+                      }}
+                      className={`rounded-lg transition-all duration-150 ${
+                        isDragOverSlot ? 'ring-2 ring-teal-600 bg-teal-50/40' : ''
+                      }`}
+                    >
+                      {!stepObj ? (
+                        <div className="px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50/60 text-xs text-slate-400 flex items-center gap-2.5">
+                          <span className="w-5 h-5 rounded bg-slate-200 text-slate-700 font-mono text-[11px] font-bold flex items-center justify-center tabular-nums">
+                            {slotIdx + 1}
+                          </span>
+                          <span>Kéo thả bước {slotIdx + 1} vào đây</span>
+                        </div>
+                      ) : (
+                        <div
+                          draggable={!readOnly}
+                          onDragStart={(e) => {
+                            setDraggedStepId(stepObj.id);
+                            e.dataTransfer.setData('text/plain', stepObj.id);
+                          }}
+                          onDragEnd={() => {
+                            setDraggedStepId(null);
+                            setDragOverSlotIndex(null);
+                          }}
+                          className={`px-3 py-2 rounded-lg border-2 transition-all duration-150 flex flex-col gap-1 ${
+                            readOnly ? '' : 'cursor-grab active:cursor-grabbing'
+                          } ${
+                            showFeedback
+                              ? isSlotCorrect
+                                ? 'feedback-option-correct border-emerald-500/80 bg-emerald-50/75'
+                                : 'feedback-option-wrong border-rose-400/80 bg-rose-50/75'
+                              : 'border-teal-600/70 bg-teal-50/30'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <GripVertical className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span
+                                className={`w-5 h-5 rounded text-[11px] font-mono font-bold flex items-center justify-center shrink-0 tabular-nums ${
+                                  showFeedback
+                                    ? isSlotCorrect
+                                      ? 'bg-emerald-600 text-white'
+                                      : 'bg-rose-500 text-white'
+                                    : 'bg-teal-800 text-white'
+                                }`}
+                              >
+                                {slotIdx + 1}
+                              </span>
+                              <span className="text-xs sm:text-[13px] font-semibold text-slate-900 leading-snug">
+                                {stepObj.text}
+                              </span>
                             </div>
 
-                            {showFeedback && !isSlotCorrect && expectedStepObj && (
-                              <div className="text-xs text-rose-800 font-medium pl-8">
-                                Đúng ở vị trí #{slotIdx + 1} phải là:{' '}
-                                <strong className="underline text-emerald-800">
-                                  {expectedStepObj.text}
-                                </strong>
+                            {!readOnly && (
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  aria-label={`Di chuyển bước ${slotIdx + 1} lên`}
+                                  disabled={slotIdx === 0}
+                                  onClick={() => handleMoveOrderedStep(slotIdx, -1)}
+                                  className="p-1 rounded border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+                                >
+                                  <ArrowUp className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Di chuyển bước ${slotIdx + 1} xuống`}
+                                  disabled={slotIdx === orderedStepIds.length - 1}
+                                  onClick={() => handleMoveOrderedStep(slotIdx, 1)}
+                                  className="p-1 rounded border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+                                >
+                                  <ArrowDown className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Gỡ bước ${stepObj.text}`}
+                                  onClick={() => handleRemoveStepFromOrder(stepObj.id)}
+                                  className="p-1 rounded border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
                               </div>
                             )}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+
+                          {showFeedback && !isSlotCorrect && expectedStepObj && (
+                            <div className="text-[11px] text-rose-800 font-medium pl-7">
+                              Đúng ở #{slotIdx + 1}:{' '}
+                              <strong className="underline text-emerald-800">
+                                {expectedStepObj.text}
+                              </strong>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

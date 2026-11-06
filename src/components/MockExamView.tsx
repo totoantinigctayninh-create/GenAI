@@ -598,20 +598,6 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                   : 'Mở rộng đề'}
               </button>
 
-              {onToggleFocusMode && (
-                <button
-                  type="button"
-                  onClick={onToggleFocusMode}
-                  className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition-colors cursor-pointer ${
-                    isFocusMode
-                      ? 'border-teal-600 bg-teal-50 text-teal-900'
-                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  {isFocusMode ? 'Hiện sidebar' : 'Ẩn sidebar'}
-                </button>
-              )}
-
               <div
                 data-testid="mock-exam-countdown"
                 className={`px-3 py-1 rounded-lg font-mono text-xs font-bold tabular-nums inline-flex items-center gap-1.5 transition-all duration-200 ${
