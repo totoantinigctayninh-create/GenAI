@@ -67,6 +67,15 @@ export function createExamSessionRouter(engine: ExamSessionEngine): Router {
   // 1. API GIÁO VIÊN: QUẢN LÝ CA THI (`/api/exam-sessions`)
   // ============================================================================
 
+  function safeDecodeHeader(val: string | undefined): string {
+    if (!val) return '';
+    try {
+      return decodeURIComponent(val).trim();
+    } catch {
+      return val.trim();
+    }
+  }
+
   function resolveTeacherActor(req: Request): string {
     const actorId = extractActorId(req);
     if (!actorId) return '';
@@ -76,10 +85,12 @@ export function createExamSessionRouter(engine: ExamSessionEngine): Router {
     }
     // Hỗ trợ đồng bộ tài khoản giáo viên đang đăng nhập nếu chưa có trong bộ nhớ máy chủ
     const roleHeader = req.header('x-user-role');
-    const classHeader = req.header('x-user-class');
+    const classHeader = safeDecodeHeader(req.header('x-user-class'));
+    const fullNameHeader = safeDecodeHeader(req.header('x-user-fullname'));
+    const usernameHeader = safeDecodeHeader(req.header('x-user-username'));
     if (roleHeader === 'teacher' || actorId.toLowerCase().startsWith('gv_')) {
       const inferredClass =
-        classHeader?.trim() ||
+        classHeader ||
         (actorId.toLowerCase() === 'gv_toan'
           ? '12A1'
           : actorId.toLowerCase() === 'gv_tin'
@@ -87,9 +98,9 @@ export function createExamSessionRouter(engine: ExamSessionEngine): Router {
             : '');
       engine.upsertUser({
         id: actorId,
-        username: actorId,
+        username: usernameHeader || actorId,
         password: '***',
-        fullName: `Giáo viên (${actorId})`,
+        fullName: fullNameHeader || `Giáo viên (${actorId})`,
         role: 'teacher',
         className: inferredClass,
         lastLogin: new Date().toISOString(),
@@ -99,6 +110,29 @@ export function createExamSessionRouter(engine: ExamSessionEngine): Router {
     }
     return actorId;
   }
+
+  // Đồng bộ danh sách người dùng và câu hỏi từ trình duyệt lên máy chủ
+  router.post('/exam-sessions/sync-context', (req: Request, res: Response) => {
+    try {
+      const body = req.body ?? {};
+      if (Array.isArray(body.users) && body.users.length > 0) {
+        for (const u of body.users) {
+          if (u && typeof u.id === 'string' && typeof u.role === 'string') {
+            engine.upsertUser(u);
+          }
+        }
+      }
+      if (body.currentUser && typeof body.currentUser.id === 'string') {
+        engine.upsertUser(body.currentUser);
+      }
+      if (Array.isArray(body.questions) && body.questions.length > 0) {
+        engine.setQuestions(body.questions);
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      handleRouteError(res, error);
+    }
+  });
 
   // Lấy danh sách ca thi của giáo viên
   router.get('/exam-sessions', (req: Request, res: Response) => {

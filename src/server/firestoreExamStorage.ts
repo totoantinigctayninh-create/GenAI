@@ -138,23 +138,30 @@ export function createFirestoreExamStorageAdapter(): ExamStorageAdapter {
     async onAttemptSaved(attempt: SessionAttemptRecord) {
       const path = `attempts/${attempt.id}`;
       try {
-        // Bổ sung các trường tương thích với schema Attempt hiện có trên Firestore
+        // Bổ sung các trường tương thích với schema Attempt hiện có trên Firestore & firestore.rules
         const payload = stripUndefinedFields({
           ...attempt,
           userId: attempt.studentId,
+          username: attempt.username || attempt.studentId,
+          fullName: attempt.fullName || attempt.username || attempt.studentId,
+          totalQuestions:
+            attempt.totalQuestions ?? attempt.generatedQuestions?.length ?? 0,
+          correctCount: attempt.correctCount ?? 0,
           examSet: attempt.sessionTitle,
           mode: `Ca thi: ${attempt.sessionTitle} (${attempt.sessionCode})`,
           certiportScore: attempt.score ?? 0,
-          durationSeconds: attempt.submittedAt
-            ? Math.max(
-                0,
-                Math.round(
-                  (new Date(attempt.submittedAt).getTime() -
-                    new Date(attempt.startedAt).getTime()) /
-                    1000
+          durationSeconds:
+            attempt.durationSeconds ??
+            (attempt.submittedAt
+              ? Math.max(
+                  0,
+                  Math.round(
+                    (new Date(attempt.submittedAt).getTime() -
+                      new Date(attempt.startedAt).getTime()) /
+                      1000
+                  )
                 )
-              )
-            : 0,
+              : 0),
           completedAt: attempt.submittedAt ?? attempt.startedAt,
         });
         await setDoc(doc(db, 'attempts', attempt.id), payload);

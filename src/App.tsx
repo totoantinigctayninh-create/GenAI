@@ -33,6 +33,7 @@ import {
 } from './services/firebase';
 import { ExamAttempt, Question, UserAccount } from './types/exam';
 import { computeUpdatedWrongQuestions } from './utils/scoring';
+import { examSessionApi } from './services/examSessionApi';
 
 const SESSION_STORAGE_KEY = 'certiport_genai_active_user_id_v3';
 const USERS_CACHE_KEY = 'certiport_genai_users_cache_v3';
@@ -264,6 +265,14 @@ export default function App() {
 
     return null;
   }, [activeUserId, users]);
+
+  useEffect(() => {
+    examSessionApi.syncContext({
+      currentUser,
+      users,
+      questions,
+    });
+  }, [currentUser, users, questions]);
 
   const handleLogin = useCallback(
     async (username: string, password: string) => {

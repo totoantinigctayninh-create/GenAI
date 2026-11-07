@@ -144,8 +144,14 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
     async (silent = false) => {
       if (!silent) setLoading(true);
       try {
+        examSessionApi.syncContext({
+          currentUser,
+          users,
+          questions,
+        });
         const res = await examSessionApi.listSessions(teacherId);
         setSessions(Array.isArray(res.sessions) ? res.sessions : []);
+        setBannerMessage((prev) => (prev?.type === 'error' ? null : prev));
       } catch (err) {
         const msg =
           err instanceof Error
@@ -156,8 +162,16 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
         if (!silent) setLoading(false);
       }
     },
-    [teacherId]
+    [teacherId, currentUser, users, questions]
   );
+
+  useEffect(() => {
+    examSessionApi.syncContext({
+      currentUser,
+      users,
+      questions,
+    });
+  }, [currentUser, users, questions]);
 
   useEffect(() => {
     void loadSessions(false);

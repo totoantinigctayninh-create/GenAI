@@ -964,3 +964,60 @@ test('Bước 6/8: Theo dõi trực tiếp (32 đang thi, 5 đã nộp, 3 chưa 
   assert.equal(simDetail.attempts[0].violationCount >= simDetail.attempts[1].violationCount, true);
 });
 
+test('Giáo viên tùy chỉnh (ví dụ khanglp) đồng bộ qua header hoặc sync-context tạo và tải danh sách ca thi thành công', async () => {
+  const { engine } = createTestSetup();
+  const app = express();
+  app.use(express.json());
+  app.use('/api', createExamSessionRouter(engine));
+
+  const server = app.listen(0);
+  try {
+    const addr = server.address();
+    const port = typeof addr === 'object' && addr ? addr.port : 0;
+    const baseUrl = `http://127.0.0.1:${port}/api`;
+
+    // 1. Gọi GET /api/exam-sessions bằng tài khoản giáo viên mới 'khanglp' kèm header x-user-role: teacher
+    const listRes = await fetch(`${baseUrl}/exam-sessions`, {
+      headers: {
+        'x-user-id': 'khanglp',
+        'x-user-role': 'teacher',
+        'x-user-fullname': encodeURIComponent('Lê Phúc Khang'),
+      },
+    });
+    assert.equal(listRes.status, 200);
+    const listJson = (await listRes.json()) as {
+      ok: boolean;
+      sessions: Array<{ id: string }>;
+    };
+    assert.equal(listJson.ok, true);
+
+    // 2. Tạo ca thi mới bởi 'khanglp'
+    const createRes = await fetch(`${baseUrl}/exam-sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': 'khanglp',
+        'x-user-role': 'teacher',
+        'x-user-fullname': encodeURIComponent('Lê Phúc Khang'),
+      },
+      body: JSON.stringify({
+        title: 'Kiểm tra GenAI Khối 12',
+        targetClass: 'ALL',
+        questionCount: 4,
+        durationMinutes: 50,
+        status: 'open',
+      }),
+    });
+    assert.equal(createRes.status, 201);
+    const createJson = (await createRes.json()) as {
+      ok: boolean;
+      session: { id: string; code: string; title: string; createdBy: string };
+    };
+    assert.equal(createJson.ok, true);
+    assert.equal(createJson.session.createdBy, 'khanglp');
+    assert.equal(createJson.session.code.length, 6);
+  } finally {
+    server.close();
+  }
+});
+
