@@ -1,4 +1,4 @@
-import {
+import type {
   BreakdownStatItem,
   CorrectAnswerValue,
   DropdownSubItem,
@@ -8,7 +8,7 @@ import {
   QuestionOption,
   QuestionType,
   UserAnswer,
-} from './exam';
+} from './exam.ts';
 
 export type ExamSessionSelectionMode = 'proportional' | 'manual';
 

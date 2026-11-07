@@ -1,28 +1,109 @@
+import fs from 'node:fs';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   collection,
   deleteDoc,
   doc,
   getDocs,
+  getFirestore,
+  initializeFirestore,
   onSnapshot,
   setDoc,
+  setLogLevel,
 } from 'firebase/firestore';
 import {
-  db,
-  handleFirestoreError,
-  isLegacyVirtualQuestion,
-  isLegacyVirtualUser,
-  OperationType,
-} from '../services/firebase';
-import { SEED_USERS } from '../data/seedData';
-import { Question, UserAccount } from '../types/exam';
-import {
+  LEGACY_SEED_CREATED_PREFIX,
+  LEGACY_SEED_QUESTION_IDS,
+  LEGACY_SEED_USER_IDS,
+  SEED_USERS,
+} from '../data/seedData.ts';
+import type { Question, UserAccount } from '../types/exam.ts';
+import type {
   AttemptAnswerRecord,
   ExamAuditLogRecord,
   ExamSessionRecord,
   SessionAttemptRecord,
   ViolationEventRecord,
-} from '../types/examSession';
-import { ExamSessionEngine, ExamStorageAdapter } from './examSessionEngine';
+} from '../types/examSession.ts';
+import { ExamSessionEngine, type ExamStorageAdapter } from './examSessionEngine.ts';
+
+setLogLevel('silent');
+
+const firebaseConfigUrl = new URL('../../firebase-applet-config.json', import.meta.url);
+const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigUrl, 'utf-8')) as {
+  projectId: string;
+  appId: string;
+  apiKey: string;
+  authDomain: string;
+  firestoreDatabaseId: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+};
+
+const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+function getServerFirestore() {
+  try {
+    return initializeFirestore(
+      firebaseApp,
+      { experimentalAutoDetectLongPolling: true },
+      firebaseConfig.firestoreDatabaseId
+    );
+  } catch {
+    return getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+  }
+}
+
+const db = getServerFirestore();
+
+const OperationType = {
+  CREATE: 'create',
+  UPDATE: 'update',
+  DELETE: 'delete',
+  LIST: 'list',
+  GET: 'get',
+  WRITE: 'write',
+} as const;
+
+type ServerOperationType = (typeof OperationType)[keyof typeof OperationType];
+
+function isLegacyVirtualUser(u: UserAccount): boolean {
+  return (
+    LEGACY_SEED_USER_IDS.includes(u.id) &&
+    Boolean(!u.createdAt || u.createdAt.startsWith('2026-10-20T08:'))
+  );
+}
+
+function isLegacyVirtualQuestion(q: Question): boolean {
+  return (
+    q.id === 'Q176' ||
+    (LEGACY_SEED_QUESTION_IDS.includes(q.id) &&
+      Boolean(!q.createdAt || q.createdAt.startsWith(LEGACY_SEED_CREATED_PREFIX)))
+  );
+}
+
+function handleFirestoreError(
+  error: unknown,
+  operationType: ServerOperationType,
+  path: string | null
+): void {
+  const msg = error instanceof Error ? error.message : String(error);
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes('client is offline') ||
+    lower.includes('could not reach cloud firestore backend') ||
+    lower.includes('unavailable') ||
+    lower.includes('network error') ||
+    lower.includes('failed to get document')
+  ) {
+    console.warn('Firestore offline/timeout fallback active:', path);
+    return;
+  }
+  console.warn(
+    'Firestore operation notice:',
+    JSON.stringify({ error: msg, operationType, path })
+  );
+}
 
 function stripUndefinedFields<T extends object>(obj: T): Record<string, unknown> {
   const clean: Record<string, unknown> = {};

@@ -1,11 +1,11 @@
 import {
   CERTIPORT_PASS_SCORE,
   CERTIPORT_TOPICS,
-  Question,
-  UserAccount,
-  UserAnswer,
-} from '../types/exam';
-import {
+  type Question,
+  type UserAccount,
+  type UserAnswer,
+} from '../types/exam.ts';
+import type {
   AttemptAnswerRecord,
   AttemptSubmitReason,
   ExamAuditAction,
@@ -24,14 +24,14 @@ import {
   VerifyCodeResult,
   ViolationEventRecord,
   ViolationEventType,
-} from '../types/examSession';
+} from '../types/examSession.ts';
 import {
   buildProportionalExamPool,
   evaluateExamSet,
   getCorrectAnswerBreakdown,
   getUserAnswerBreakdown,
-} from '../utils/scoring';
-import { doesViolationCountTowardLimit } from '../utils/liveExamHelpers';
+} from '../utils/scoring.ts';
+import { doesViolationCountTowardLimit } from '../utils/liveExamHelpers.ts';
 
 /**
  * Bảng chữ cái sinh mã ca thi 6 ký tự:

@@ -1,5 +1,5 @@
-import { MatchingPair, Question, UserAnswer } from '../types/exam';
-import {
+import type { MatchingPair, Question, UserAnswer } from '../types/exam.ts';
+import type {
   AttemptSubmitReason,
   SanitizedStudentQuestion,
   SessionAttemptRecord,
@@ -7,7 +7,7 @@ import {
   TeacherLiveNotEnteredStudent,
   ViolationEventRecord,
   ViolationEventType,
-} from '../types/examSession';
+} from '../types/examSession.ts';
 
 export interface LocalAnswerBackupEntry {
   selectedAnswer: UserAnswer | null;

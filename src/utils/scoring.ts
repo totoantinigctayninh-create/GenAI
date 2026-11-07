@@ -1,15 +1,15 @@
 import {
-  BreakdownStatItem,
+  type BreakdownStatItem,
   CERTIPORT_PASS_SCORE,
   CERTIPORT_TOPICS,
   MOCK_EXAM_MAX_QUESTIONS,
-  MockExamQuestionResult,
+  type MockExamQuestionResult,
   QUESTION_TYPE_LABELS,
-  Question,
-  QuestionType,
-  QuestionTypeFilter,
-  UserAnswer,
-} from '../types/exam';
+  type Question,
+  type QuestionType,
+  type QuestionTypeFilter,
+  type UserAnswer,
+} from '../types/exam.ts';
 
 /**
  * Cơ chế chấm điểm Chuẩn Certiport (Strict All-or-Nothing Scoring):

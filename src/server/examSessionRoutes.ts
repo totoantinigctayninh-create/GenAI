@@ -1,12 +1,12 @@
-import express, { Request, Response, Router } from 'express';
+import express, { type Request, type Response, Router } from 'express';
 import {
-  CreateExamSessionInput,
+  type CreateExamSessionInput,
   ExamEngineError,
   ExamSessionEngine,
-  UpdateExamSessionInput,
-} from './examSessionEngine';
-import { ViolationEventType } from '../types/examSession';
-import { UserAnswer } from '../types/exam';
+  type UpdateExamSessionInput,
+} from './examSessionEngine.ts';
+import type { ViolationEventType } from '../types/examSession.ts';
+import type { UserAnswer } from '../types/exam.ts';
 
 function extractActorId(req: Request): string {
   const headerUser = req.header('x-user-id') || req.header('x-actor-id');

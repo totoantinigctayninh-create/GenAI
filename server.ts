@@ -1,13 +1,12 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
-import { ExamSessionEngine } from './src/server/examSessionEngine';
-import { createExamSessionRouter } from './src/server/examSessionRoutes';
+import { ExamSessionEngine } from './src/server/examSessionEngine.ts';
+import { createExamSessionRouter } from './src/server/examSessionRoutes.ts';
 import {
   createFirestoreExamStorageAdapter,
   syncEngineWithFirestore,
-} from './src/server/firestoreExamStorage';
+} from './src/server/firestoreExamStorage.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,6 +30,7 @@ export async function startServer() {
   app.use('/api', createExamSessionRouter(engine));
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

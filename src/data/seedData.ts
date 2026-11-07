@@ -1,4 +1,4 @@
-import { ExamAttempt, Question, UserAccount } from '../types/exam';
+import type { ExamAttempt, Question, UserAccount } from '../types/exam.ts';
 
 /**
  * Tài khoản Quản trị viên mặc định duy nhất để Giáo viên đăng nhập quản lý hệ thống.
