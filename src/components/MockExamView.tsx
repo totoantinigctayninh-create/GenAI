@@ -4,12 +4,14 @@ import {
   Award,
   BarChart3,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
   FileCheck2,
   Flag,
   HelpCircle,
+  Keyboard,
   Layers,
   PlayCircle,
   RotateCcw,
@@ -40,6 +42,7 @@ import {
   getUserAnswerBreakdown,
   isQuestionAnswered,
 } from '../utils/scoring';
+import { getShortTopicName } from '../utils/uiFormatting';
 import { QuestionFontScale, QuestionRenderer } from './QuestionRenderer';
 import { formatStudyDuration } from './StudentPortal';
 
@@ -81,6 +84,8 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
   const [desiredTimeMinutes, setDesiredTimeMinutes] = useState<number>(50);
   const [elapsedExamSeconds, setElapsedExamSeconds] = useState<number>(0);
   const [isNavigatorCollapsed, setIsNavigatorCollapsed] = useState<boolean>(false);
+  const [showRulesDetail, setShowRulesDetail] = useState<boolean>(false);
+  const [showAllocationDetail, setShowAllocationDetail] = useState<boolean>(false);
 
   const [examQuestions, setExamQuestions] = useState<Question[]>(() =>
     buildMockExamQuestionPool(questionsBank, MOCK_EXAM_MAX_QUESTIONS)
@@ -294,192 +299,262 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
   if (phase === 'intro') {
     const targetQuestionCount = proportionalPreview.targetCount;
     const countOptions = Array.from(
-      new Set([5, 10, 20, 35, MOCK_EXAM_MAX_QUESTIONS, questionsBank.length])
+      new Set([10, 20, 30, 35, MOCK_EXAM_MAX_QUESTIONS, questionsBank.length])
     )
       .filter((n) => n > 0 && n <= Math.max(MOCK_EXAM_MAX_QUESTIONS, questionsBank.length))
       .sort((a, b) => a - b);
 
+    const segmentColors = [
+      'var(--color-teal-seg-1)',
+      'var(--color-teal-seg-2)',
+      'var(--color-teal-seg-3)',
+      'var(--color-teal-seg-4)',
+    ];
+
+    const startButtonLabel =
+      questionsBank.length === 0
+        ? 'Ngân hàng đề trống'
+        : desiredQuestionCount === MOCK_EXAM_MAX_QUESTIONS
+          ? 'Vào phòng thi'
+          : `Vào phòng thi, ${targetQuestionCount} câu`;
+
     return (
-      <div className="space-y-6">
-        <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 shadow-2xs space-y-6">
-          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-6">
-            <div className="space-y-2 max-w-2xl">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-teal-50 border border-teal-200 text-xs font-bold text-teal-800">
-                <Award className="w-4 h-4" />
-                <span>CHẾ ĐỘ THI THỬ · GIAO DIỆN PHÒNG THI TẬP TRUNG</span>
-              </div>
-              <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
-                Bài Thi Thử Chứng Chỉ Certiport Generative AI
-              </h2>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                Hệ thống tự động <strong>bốc ngẫu nhiên câu hỏi theo đúng tỉ lệ Chuyên đề trong Ngân hàng đề</strong>, tối ưu giao diện tập trung không xao nhãng và chấm điểm theo thang 1000 (All-or-Nothing).
-              </p>
-            </div>
+      <div
+        data-testid="mock-exam-intro-view"
+        className="w-full max-w-[880px] space-y-8 text-left"
+      >
+        {/* a) Đầu trang */}
+        <header className="space-y-2">
+          <h1 className="text-[length:var(--text-title)] font-bold tracking-tight text-[var(--color-text-primary)]">
+            Thi thử Certiport Generative AI
+          </h1>
+          <p className="text-[15px] text-[var(--color-text-muted)]">
+            45 câu trong 50 phút, đạt từ {CERTIPORT_PASS_SCORE}/1000 điểm.
+          </p>
+        </header>
 
-            <div className="flex flex-wrap items-end gap-3 shrink-0">
-              <div>
-                <label
-                  htmlFor="mock-exam-count-select"
-                  className="block text-[11px] font-bold text-slate-600 mb-1"
-                >
-                  1. Chọn số câu hỏi:
-                </label>
-                <select
-                  id="mock-exam-count-select"
-                  value={desiredQuestionCount}
-                  onChange={(e) =>
-                    setDesiredQuestionCount(parseInt(e.target.value, 10) || MOCK_EXAM_MAX_QUESTIONS)
-                  }
-                  className="px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-xs sm:text-sm font-bold text-slate-900"
-                >
-                  {countOptions.map((cnt) => (
-                    <option key={cnt} value={cnt}>
-                      {cnt === MOCK_EXAM_MAX_QUESTIONS && cnt !== questionsBank.length
-                        ? `Chuẩn Certiport (${Math.min(cnt, questionsBank.length)} câu theo tỉ lệ)`
-                        : cnt === questionsBank.length
-                          ? `Làm tất cả các câu (${cnt} câu)`
-                          : `Đề ${cnt} câu (bốc theo tỉ lệ ngân hàng)`}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="mock-exam-time-select"
-                  className="block text-[11px] font-bold text-slate-600 mb-1"
-                >
-                  2. Thời gian làm bài:
-                </label>
-                <select
-                  id="mock-exam-time-select"
-                  value={desiredTimeMinutes}
-                  onChange={(e) => setDesiredTimeMinutes(parseInt(e.target.value, 10) || 0)}
-                  className="px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-xs sm:text-sm font-bold text-slate-900"
-                >
-                  <option value={50}>50 phút (Chuẩn phòng thi Certiport)</option>
-                  <option value={30}>30 phút (Luyện tốc độ)</option>
-                  <option value={60}>60 phút (Mở rộng)</option>
-                  <option value={0}>∞ Không giới hạn thời gian</option>
-                </select>
-              </div>
-
-              <button
-                type="button"
-                data-testid="start-mock-exam-btn"
-                disabled={questionsBank.length === 0}
-                onClick={handleStartNewMockExam}
-                className="px-6 py-3 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-sm sm:text-base font-bold transition-all inline-flex items-center gap-2.5 shadow-sm cursor-pointer shrink-0"
+        {/* b) Thanh thiết lập (một hàng, thẻ nổi bật duy nhất) */}
+        <section className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl p-5 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+            <div className="flex-1 min-w-[180px]">
+              <label
+                htmlFor="mock-exam-count-select"
+                className="block text-[13px] font-semibold text-[var(--color-text-secondary)] mb-1.5"
               >
-                <PlayCircle className="w-5 h-5" />
-                <span>
-                  {questionsBank.length === 0
-                    ? 'Ngân hàng đề đang trống (0 câu)'
-                    : `Vào Phòng Thi (${targetQuestionCount} câu)`}
-                </span>
-              </button>
+                Số câu
+              </label>
+              <select
+                id="mock-exam-count-select"
+                data-testid="mock-exam-count-select"
+                value={desiredQuestionCount}
+                onChange={(e) =>
+                  setDesiredQuestionCount(
+                    parseInt(e.target.value, 10) || MOCK_EXAM_MAX_QUESTIONS
+                  )
+                }
+                className="w-full h-11 px-3.5 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] text-[15px] font-medium text-[var(--color-text-primary)] cursor-pointer transition-colors duration-150"
+              >
+                {countOptions.map((cnt) => (
+                  <option key={cnt} value={cnt}>
+                    {cnt === MOCK_EXAM_MAX_QUESTIONS
+                      ? '45 câu (chuẩn Certiport)'
+                      : cnt === questionsBank.length && cnt !== MOCK_EXAM_MAX_QUESTIONS
+                        ? `${cnt} câu (toàn bộ ngân hàng)`
+                        : `${cnt} câu`}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            <div className="flex-1 min-w-[180px]">
+              <label
+                htmlFor="mock-exam-time-select"
+                className="block text-[13px] font-semibold text-[var(--color-text-secondary)] mb-1.5"
+              >
+                Thời gian
+              </label>
+              <select
+                id="mock-exam-time-select"
+                data-testid="mock-exam-time-select"
+                value={desiredTimeMinutes}
+                onChange={(e) =>
+                  setDesiredTimeMinutes(parseInt(e.target.value, 10) || 0)
+                }
+                className="w-full h-11 px-3.5 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] text-[15px] font-medium text-[var(--color-text-primary)] cursor-pointer transition-colors duration-150"
+              >
+                <option value={50}>50 phút (chuẩn Certiport)</option>
+                <option value={30}>30 phút</option>
+                <option value={60}>60 phút</option>
+                <option value={0}>Không giới hạn</option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              data-testid="start-mock-exam-btn"
+              disabled={questionsBank.length === 0}
+              onClick={handleStartNewMockExam}
+              className="w-full sm:w-auto sm:ml-auto h-11 px-6 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-white text-[15px] font-semibold transition-colors duration-150 inline-flex items-center justify-center shrink-0 cursor-pointer"
+            >
+              {startButtonLabel}
+            </button>
+          </div>
+        </section>
+
+        {/* c) Quy định phòng thi (3 dòng ngắn gọn + accordion đóng sẵn) */}
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+            Quy định phòng thi
+          </h2>
+
+          <ul className="space-y-2.5 text-[15px] text-[var(--color-text-secondary)]">
+            <li className="flex items-center gap-3">
+              <Clock className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+              <span>Còn dưới 5 phút: cảnh báo đỏ, hết giờ tự nộp</span>
+            </li>
+            <li className="flex items-center gap-3">
+              <CheckCircle2 className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+              <span>Đúng đủ ý mới được điểm</span>
+            </li>
+            <li className="flex items-center gap-3">
+              <Keyboard className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+              <span>Tự thu gọn thanh phụ, có phím tắt chuyển câu</span>
+            </li>
+          </ul>
+
+          <div>
+            <button
+              type="button"
+              data-testid="toggle-exam-rules-detail-btn"
+              aria-expanded={showRulesDetail}
+              onClick={() => setShowRulesDetail((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 text-[14px] font-medium text-teal-700 dark:text-teal-400 hover:underline cursor-pointer"
+            >
+              <span>Xem quy định chi tiết</span>
+              <ChevronDown
+                className={`w-4 h-4 transition-transform duration-150 ${
+                  showRulesDetail ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+
+            {showRulesDetail && (
+              <div
+                data-testid="exam-rules-detail-content"
+                className="mt-3 p-4 rounded-lg bg-[var(--color-bg-subtle)] border border-[var(--color-border-subtle)] text-[14px] text-[var(--color-text-secondary)] space-y-2"
+              >
+                <p>
+                  <strong>Thời gian làm bài:</strong> Đồng hồ đếm ngược hiển thị cố định ở góc trên. Khi thời gian còn dưới 5 phút, thanh đồng hồ chuyển sang màu đỏ cảnh báo và tự động thu bài ngay khi về 00:00.
+                </p>
+                <p>
+                  <strong>Chấm điểm chuẩn Certiport:</strong> Bài thi quy đổi sang thang 1000 điểm (đạt từ {CERTIPORT_PASS_SCORE}/1000). Với các câu nhiều lựa chọn, nối cặp hoặc sắp xếp thứ tự, thí sinh cần chọn đúng toàn bộ các ý trong câu mới được tính điểm.
+                </p>
+                <p>
+                  <strong>Giao diện tập trung:</strong> Khi vào phòng thi, thanh điều hướng trái tự động thu gọn. Bạn có thể dùng phím mũi tên trái/phải trên bàn phím để chuyển câu nhanh và gắn cờ xem lại những câu phân vân.
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* d) Phân bổ câu hỏi (Thanh ngang 4 đoạn sắc độ teal + chú giải 4 dòng + accordion đóng sẵn) */}
+        <section className="space-y-4 pt-2 border-t border-[var(--color-border-subtle)]">
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+              Phân bổ câu hỏi
+            </h2>
+            <span className="text-[14px] text-[var(--color-text-muted)] tabular-nums">
+              Tổng {targetQuestionCount} câu
+            </span>
           </div>
 
-          {/* 4 Quy chuẩn phòng thi Certiport */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 tabular-nums">
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
-              <div className="flex items-center gap-2 text-xs font-bold text-teal-800">
-                <Shuffle className="w-4 h-4" />
-                <span>BỐC ĐỀ THEO TỈ LỆ NGÂN HÀNG</span>
-              </div>
-              <div className="text-xl font-bold font-mono text-slate-900">
-                {targetQuestionCount} / {questionsBank.length} câu
-              </div>
-              <p className="text-xs text-slate-600">
-                Tự động phân bổ số câu hỏi của từng Chuyên đề khớp chính xác với tỉ trọng câu hỏi trong Ngân hàng đề.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
-              <div className="flex items-center gap-2 text-xs font-bold text-teal-800">
-                <Clock className="w-4 h-4" />
-                <span>THỜI GIAN LÀM BÀI</span>
-              </div>
-              <div className="text-xl font-bold font-mono text-slate-900">
-                {desiredTimeMinutes > 0
-                  ? `${desiredTimeMinutes} phút (${desiredTimeMinutes}:00)`
-                  : '∞ Không giới hạn'}
-              </div>
-              <p className="text-xs text-slate-600">
-                {desiredTimeMinutes > 0
-                  ? 'Đổi màu cảnh báo đỏ khi còn dưới 5 phút và tự động nộp bài ngay khi hết giờ.'
-                  : 'Cho phép làm bài thoải mái không giới hạn thời gian cho đến khi bấm Nộp bài.'}
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
-              <div className="flex items-center gap-2 text-xs font-bold text-teal-800">
-                <FileCheck2 className="w-4 h-4" />
-                <span>THANG ĐIỂM CERTIPORT</span>
-              </div>
-              <div className="text-xl font-bold font-mono text-slate-900">
-                &ge; {CERTIPORT_PASS_SCORE} / 1000
-              </div>
-              <p className="text-xs text-slate-600">
-                Quy đổi ra thang 1000 điểm chuẩn. Đúng 100% các ý trong câu mới được tính điểm.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
-              <div className="flex items-center gap-2 text-xs font-bold text-teal-800">
-                <ShieldAlert className="w-4 h-4" />
-                <span>GIAO DIỆN TẬP TRUNG CAO</span>
-              </div>
-              <div className="text-xl font-bold font-mono text-slate-900">
-                Focus Mode + Cỡ chữ
-              </div>
-              <p className="text-xs text-slate-600">
-                Tự động thu gọn thanh phụ, hỗ trợ phóng chữ (A-/A/A+) và phím tắt điều hướng nhanh.
-              </p>
-            </div>
-          </div>
-
-          {/* Bảng Cấu trúc Tỉ lệ Bốc câu hỏi từ Ngân hàng theo 4 Chuyên đề */}
-          <div className="p-5 rounded-xl bg-sky-50/60 border border-sky-200 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs sm:text-sm font-bold text-teal-900 flex items-center gap-2">
-                <Layers className="w-4 h-4 text-teal-700" />
-                <span>
-                  Cấu trúc Bốc câu hỏi Ngẫu nhiên theo Tỉ lệ Ngân hàng ({targetQuestionCount} câu được bốc / {questionsBank.length} câu trong kho)
-                </span>
-              </div>
-              <span className="text-xs text-slate-600 font-medium">
-                Phương pháp phân bổ tỉ lệ Hamilton (Largest Remainder)
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 tabular-nums">
-              {proportionalPreview.topicAllocations.map((alloc) => (
+          {/* Thanh ngang chia 4 đoạn theo số câu bốc */}
+          <div
+            data-testid="mock-exam-proportional-bar"
+            className="w-full h-3 rounded-full overflow-hidden flex bg-slate-200 dark:bg-slate-800 gap-0.5"
+          >
+            {proportionalPreview.topicAllocations.map((alloc, idx) => {
+              const shortName = getShortTopicName(alloc.topic);
+              const segWidth =
+                targetQuestionCount > 0
+                  ? Math.max(4, (alloc.allocatedCount / targetQuestionCount) * 100)
+                  : 25;
+              return (
                 <div
                   key={alloc.topic}
-                  className="bg-white border border-slate-200 rounded-lg p-3.5 space-y-1.5"
+                  title={`${shortName}: ${alloc.allocatedCount} câu (Ngân hàng: ${alloc.bankCount} câu, ${alloc.bankPercentage}%)`}
+                  style={{
+                    width: `${segWidth}%`,
+                    backgroundColor: segmentColors[idx % segmentColors.length],
+                  }}
+                  className="h-full first:rounded-l-full last:rounded-r-full transition-all duration-150"
+                />
+              );
+            })}
+          </div>
+
+          {/* Chú giải 4 dòng bên dưới */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 tabular-nums">
+            {proportionalPreview.topicAllocations.map((alloc, idx) => {
+              const shortName = getShortTopicName(alloc.topic);
+              return (
+                <div
+                  key={alloc.topic}
+                  title={`Ngân hàng hiện có ${alloc.bankCount} câu (${alloc.bankPercentage}%)`}
+                  className="flex items-center gap-2.5 text-[15px] text-[var(--color-text-secondary)]"
                 >
-                  <div className="text-xs font-bold text-slate-900 line-clamp-1">
-                    {alloc.topic}
-                  </div>
-                  <div className="flex items-baseline justify-between text-xs">
-                    <span className="text-slate-500">
-                      Trong ngân hàng: <strong>{alloc.bankCount} câu</strong> ({alloc.bankPercentage}%)
-                    </span>
-                    <span className="font-mono font-bold text-teal-800 text-sm">
-                      Bốc {alloc.allocatedCount} câu
-                    </span>
-                  </div>
-                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-teal-600 rounded-full"
-                      style={{ width: `${Math.max(4, alloc.bankPercentage)}%` }}
-                    />
-                  </div>
+                  <span
+                    className="w-3 h-3 rounded-xs shrink-0"
+                    style={{
+                      backgroundColor: segmentColors[idx % segmentColors.length],
+                    }}
+                  />
+                  <span>
+                    {shortName},{' '}
+                    <strong className="font-semibold text-[var(--color-text-primary)]">
+                      {alloc.allocatedCount} câu
+                    </strong>
+                  </span>
                 </div>
-              ))}
-            </div>
+              );
+            })}
+          </div>
+
+          {/* Accordion đóng sẵn: Cách chọn câu hỏi */}
+          <div>
+            <button
+              type="button"
+              data-testid="toggle-allocation-method-btn"
+              aria-expanded={showAllocationDetail}
+              onClick={() => setShowAllocationDetail((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 text-[14px] font-medium text-teal-700 dark:text-teal-400 hover:underline cursor-pointer"
+            >
+              <span>Cách chọn câu hỏi</span>
+              <ChevronDown
+                className={`w-4 h-4 transition-transform duration-150 ${
+                  showAllocationDetail ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+
+            {showAllocationDetail && (
+              <div
+                data-testid="allocation-method-detail-content"
+                className="mt-3 p-4 rounded-lg bg-[var(--color-bg-subtle)] border border-[var(--color-border-subtle)] text-[14px] text-[var(--color-text-secondary)] space-y-2 tabular-nums"
+              >
+                <p>
+                  Hệ thống tự động bốc ngẫu nhiên {targetQuestionCount} câu hỏi từ {questionsBank.length} câu trong ngân hàng theo phương pháp phân bổ tỉ lệ Hamilton (Largest Remainder) để giữ đúng cấu trúc đề thi:
+                </p>
+                <ul className="space-y-1 pt-1">
+                  {proportionalPreview.topicAllocations.map((alloc) => (
+                    <li key={alloc.topic}>
+                      • <strong>{getShortTopicName(alloc.topic)}:</strong> bốc{' '}
+                      <strong>{alloc.allocatedCount} câu</strong> từ {alloc.bankCount} câu trong kho ({alloc.bankPercentage}%)
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </section>
       </div>

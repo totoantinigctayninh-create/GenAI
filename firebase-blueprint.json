@@ -72,12 +72,7 @@
           "maxLength": 64
         }
       },
-      "required": [
-        "username",
-        "password",
-        "fullName",
-        "role"
-      ]
+      "required": ["username", "password", "fullName", "role"]
     },
     "Question": {
       "title": "Question",
@@ -135,14 +130,128 @@
         "explanation"
       ]
     },
+    "ExamSession": {
+      "title": "ExamSession",
+      "description": "Ca thi do giáo viên tạo và quản lý với mã 6 ký tự",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã định danh ca thi",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Tên ca thi",
+          "maxLength": 200
+        },
+        "code": {
+          "type": "string",
+          "description": "Mã ca thi 6 ký tự chữ và số (loại bỏ 0/O/1/I/L)",
+          "minLength": 6,
+          "maxLength": 6
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "Mã giáo viên tạo ca thi",
+          "maxLength": 64
+        },
+        "createdByName": {
+          "type": "string",
+          "description": "Họ tên giáo viên tạo ca thi",
+          "maxLength": 120
+        },
+        "targetClass": {
+          "type": "string",
+          "description": "Lớp hoặc nhóm được thi (hoặc ALL)",
+          "maxLength": 120
+        },
+        "questionCount": {
+          "type": "number",
+          "description": "Số lượng câu hỏi trong đề"
+        },
+        "durationMinutes": {
+          "type": "number",
+          "description": "Thời gian làm bài (phút)"
+        },
+        "selectionMode": {
+          "type": "string",
+          "description": "Cách lấy đề: bốc theo tỉ lệ chuyên đề hoặc chọn thủ công",
+          "enum": ["proportional", "manual"]
+        },
+        "shuffleQuestions": {
+          "type": "boolean",
+          "description": "Xáo trộn thứ tự câu hỏi (mặc định bật)"
+        },
+        "shuffleOptions": {
+          "type": "boolean",
+          "description": "Xáo trộn thứ tự đáp án (mặc định bật)"
+        },
+        "maxViolations": {
+          "type": "number",
+          "description": "Ngưỡng vi phạm tối đa (mặc định 3)"
+        },
+        "passScore": {
+          "type": "number",
+          "description": "Điểm đạt chuẩn thang 1000 (mặc định 700)"
+        },
+        "resultVisibility": {
+          "type": "string",
+          "description": "Chế độ hiển thị kết quả cho học sinh",
+          "enum": ["none", "score_only", "score_and_answers"]
+        },
+        "status": {
+          "type": "string",
+          "description": "Trạng thái ca thi",
+          "enum": ["draft", "open", "locked", "ended"]
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Thời điểm tạo ca thi (ISO 8601)",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Thời điểm cập nhật ca thi (ISO 8601)",
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "code",
+        "createdBy",
+        "targetClass",
+        "questionCount",
+        "durationMinutes",
+        "selectionMode",
+        "shuffleQuestions",
+        "shuffleOptions",
+        "maxViolations",
+        "passScore",
+        "resultVisibility",
+        "status",
+        "createdAt"
+      ]
+    },
     "Attempt": {
       "title": "Attempt",
-      "description": "Lịch sử làm bài và kết quả chấm điểm theo chuẩn Certiport All-or-Nothing",
+      "description": "Lượt thi thử hoặc lượt làm bài trong Ca thi của học sinh",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
           "description": "Mã lượt thi",
+          "maxLength": 128
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Mã ca thi (nếu thuộc ca thi do giáo viên tổ chức)",
+          "maxLength": 128
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Mã học sinh",
           "maxLength": 64
         },
         "userId": {
@@ -160,26 +269,50 @@
           "description": "Họ tên học sinh",
           "maxLength": 120
         },
-        "mode": {
+        "generatedQuestions": {
+          "type": "array",
+          "description": "Đề đã sinh riêng cho học sinh (lưu một lần, không chứa đáp án đúng)"
+        },
+        "startedAt": {
           "type": "string",
-          "description": "Chế độ thi hoặc tên bộ đề",
-          "maxLength": 120
+          "description": "Thời điểm bắt đầu ở máy chủ (ISO 8601)",
+          "maxLength": 64
+        },
+        "deadlineAt": {
+          "type": "string",
+          "description": "Hạn nộp tính ở máy chủ (ISO 8601)",
+          "maxLength": 64
+        },
+        "submittedAt": {
+          "type": "string",
+          "description": "Thời điểm nộp bài (ISO 8601)",
+          "maxLength": 64
+        },
+        "submitReason": {
+          "type": "string",
+          "description": "Kiểu nộp bài",
+          "enum": ["voluntary", "timeout", "violation", "teacher_forced"]
         },
         "score": {
           "type": "number",
-          "description": "Số câu trả lời đúng tuyệt đối"
+          "description": "Điểm số bài thi"
         },
         "totalQuestions": {
           "type": "number",
           "description": "Tổng số câu hỏi trong bài"
         },
-        "percentage": {
+        "reentryCount": {
           "type": "number",
-          "description": "Tỷ lệ phần trăm hoàn thành đúng"
+          "description": "Số lần vào lại phòng thi"
         },
-        "passed": {
-          "type": "boolean",
-          "description": "Trạng thái Đạt (>= 70%) hay Chưa đạt"
+        "violationCount": {
+          "type": "number",
+          "description": "Số lần vi phạm trong lượt thi"
+        },
+        "status": {
+          "type": "string",
+          "description": "Trạng thái lượt thi",
+          "enum": ["in_progress", "submitted"]
         },
         "durationSeconds": {
           "type": "number",
@@ -187,7 +320,7 @@
         },
         "completedAt": {
           "type": "string",
-          "description": "Thời điểm nộp bài (ISO 8601)",
+          "description": "Thời điểm hoàn thành (ISO 8601)",
           "maxLength": 64
         }
       },
@@ -199,20 +332,199 @@
         "durationSeconds",
         "completedAt"
       ]
+    },
+    "AttemptAnswer": {
+      "title": "AttemptAnswer",
+      "description": "Đáp án từng câu trong lượt thi của học sinh",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã bản ghi đáp án (attemptId_questionId)",
+          "maxLength": 160
+        },
+        "attemptId": {
+          "type": "string",
+          "description": "Mã lượt thi",
+          "maxLength": 128
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Mã ca thi",
+          "maxLength": 128
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Mã học sinh",
+          "maxLength": 64
+        },
+        "questionId": {
+          "type": "string",
+          "description": "Mã câu hỏi",
+          "maxLength": 64
+        },
+        "savedAt": {
+          "type": "string",
+          "description": "Thời điểm lưu đáp án ở máy chủ (ISO 8601)",
+          "maxLength": 64
+        },
+        "timeSpentSeconds": {
+          "type": "number",
+          "description": "Thời gian làm câu hỏi (giây)"
+        },
+        "flagged": {
+          "type": "boolean",
+          "description": "Trạng thái gắn cờ xem lại"
+        }
+      },
+      "required": [
+        "id",
+        "attemptId",
+        "questionId",
+        "savedAt",
+        "timeSpentSeconds",
+        "flagged"
+      ]
+    },
+    "ViolationEvent": {
+      "title": "ViolationEvent",
+      "description": "Sự kiện vi phạm quy chế phòng thi trong lượt làm bài",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã sự kiện vi phạm",
+          "maxLength": 128
+        },
+        "attemptId": {
+          "type": "string",
+          "description": "Mã lượt thi",
+          "maxLength": 128
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Mã ca thi",
+          "maxLength": 128
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Mã học sinh",
+          "maxLength": 64
+        },
+        "type": {
+          "type": "string",
+          "description": "Loại vi phạm",
+          "enum": [
+            "tab_switch",
+            "window_blur",
+            "fullscreen_exit",
+            "copy_paste",
+            "devtools",
+            "multi_device",
+            "other"
+          ]
+        },
+        "occurredAt": {
+          "type": "string",
+          "description": "Thời điểm xảy ra vi phạm (ISO 8601)",
+          "maxLength": 64
+        },
+        "awaySeconds": {
+          "type": "number",
+          "description": "Thời gian rời màn hình thi (giây)"
+        },
+        "currentQuestionOrder": {
+          "type": "number",
+          "description": "Số thứ tự câu đang làm khi vi phạm"
+        }
+      },
+      "required": [
+        "id",
+        "attemptId",
+        "type",
+        "occurredAt",
+        "awaySeconds",
+        "currentQuestionOrder"
+      ]
+    },
+    "ExamAuditLog": {
+      "title": "ExamAuditLog",
+      "description": "Nhật ký tác vụ quản lý ca thi của giáo viên",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã bản ghi nhật ký",
+          "maxLength": 128
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Mã ca thi",
+          "maxLength": 128
+        },
+        "actorId": {
+          "type": "string",
+          "description": "Mã giáo viên thực hiện",
+          "maxLength": 64
+        },
+        "actorName": {
+          "type": "string",
+          "description": "Họ tên giáo viên thực hiện",
+          "maxLength": 120
+        },
+        "action": {
+          "type": "string",
+          "description": "Hành động quản trị ca thi",
+          "enum": [
+            "create",
+            "update",
+            "open",
+            "lock",
+            "unlock",
+            "extend",
+            "allow_reentry",
+            "end",
+            "clone",
+            "force_submit"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Thời điểm thực hiện (ISO 8601)",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "sessionId", "actorId", "action", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
-      "description": "Lưu trữ danh sách tài khoản Giáo viên và Học sinh cùng trạng thái hoạt động, thời gian ôn tập, câu Bookmark và Kho câu sai"
+      "description": "Lưu trữ danh sách tài khoản Giáo viên và Học sinh"
     },
     "/questions/{questionId}": {
       "schema": { "$ref": "#/entities/Question" },
-      "description": "Ngân hàng câu hỏi chuẩn Certiport Generative AI (5 dạng tương tác)"
+      "description": "Ngân hàng câu hỏi chuẩn Certiport Generative AI"
+    },
+    "/exam_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/ExamSession" },
+      "description": "Danh sách ca thi do giáo viên tạo và quản lý"
     },
     "/attempts/{attemptId}": {
       "schema": { "$ref": "#/entities/Attempt" },
-      "description": "Kết quả các lượt luyện thi của học sinh"
+      "description": "Lượt thi thử và lượt thi trong ca thi của học sinh"
+    },
+    "/attempt_answers/{answerId}": {
+      "schema": { "$ref": "#/entities/AttemptAnswer" },
+      "description": "Đáp án từng câu hỏi trong lượt thi của học sinh"
+    },
+    "/violation_events/{violationId}": {
+      "schema": { "$ref": "#/entities/ViolationEvent" },
+      "description": "Sự kiện vi phạm quy chế phòng thi của học sinh"
+    },
+    "/exam_audit_log/{logId}": {
+      "schema": { "$ref": "#/entities/ExamAuditLog" },
+      "description": "Nhật ký tác vụ quản lý ca thi của giáo viên"
     }
   }
 }

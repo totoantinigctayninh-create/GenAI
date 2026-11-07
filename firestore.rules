@@ -6,7 +6,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() >= 1 && id.size() <= 128;
+      return id is string && id.size() >= 1 && id.size() <= 160;
     }
 
     function incoming() {
@@ -31,14 +31,62 @@ service cloud.firestore {
         data.explanation is string && data.explanation.size() >= 1 && data.explanation.size() <= 2000;
     }
 
+    function isValidExamSession(data) {
+      return data.keys().hasAll(['id', 'title', 'code', 'createdBy', 'targetClass', 'questionCount', 'durationMinutes', 'selectionMode', 'shuffleQuestions', 'shuffleOptions', 'maxViolations', 'passScore', 'resultVisibility', 'status', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.code is string && data.code.size() == 6 &&
+        data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 64 &&
+        data.targetClass is string && data.targetClass.size() >= 1 && data.targetClass.size() <= 120 &&
+        data.questionCount is number && data.questionCount >= 1 &&
+        data.durationMinutes is number && data.durationMinutes >= 1 &&
+        (data.selectionMode == 'proportional' || data.selectionMode == 'manual') &&
+        data.shuffleQuestions is bool &&
+        data.shuffleOptions is bool &&
+        data.maxViolations is number && data.maxViolations >= 1 &&
+        data.passScore is number && data.passScore >= 1 && data.passScore <= 1000 &&
+        (data.resultVisibility == 'none' || data.resultVisibility == 'score_only' || data.resultVisibility == 'score_and_answers') &&
+        (data.status == 'draft' || data.status == 'open' || data.status == 'locked' || data.status == 'ended') &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
     function isValidExamAttempt(data) {
       return data.keys().hasAll(['id', 'username', 'fullName', 'totalQuestions', 'durationSeconds', 'completedAt']) &&
         data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
         data.username is string && data.username.size() >= 1 && data.username.size() <= 64 &&
         data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
-        data.totalQuestions is number && data.totalQuestions >= 1 &&
+        data.totalQuestions is number && data.totalQuestions >= 0 &&
         data.durationSeconds is number && data.durationSeconds >= 0 &&
         data.completedAt is string && data.completedAt.size() <= 64;
+    }
+
+    function isValidAttemptAnswer(data) {
+      return data.keys().hasAll(['id', 'attemptId', 'questionId', 'savedAt', 'timeSpentSeconds', 'flagged']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 160 &&
+        data.attemptId is string && data.attemptId.size() >= 1 && data.attemptId.size() <= 128 &&
+        data.questionId is string && data.questionId.size() >= 1 && data.questionId.size() <= 64 &&
+        data.savedAt is string && data.savedAt.size() <= 64 &&
+        data.timeSpentSeconds is number && data.timeSpentSeconds >= 0 &&
+        data.flagged is bool;
+    }
+
+    function isValidViolationEvent(data) {
+      return data.keys().hasAll(['id', 'attemptId', 'type', 'occurredAt', 'awaySeconds', 'currentQuestionOrder']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+        data.attemptId is string && data.attemptId.size() >= 1 && data.attemptId.size() <= 128 &&
+        data.type is string && data.type.size() >= 1 && data.type.size() <= 64 &&
+        data.occurredAt is string && data.occurredAt.size() <= 64 &&
+        data.awaySeconds is number && data.awaySeconds >= 0 &&
+        data.currentQuestionOrder is number && data.currentQuestionOrder >= 1;
+    }
+
+    function isValidExamAuditLog(data) {
+      return data.keys().hasAll(['id', 'sessionId', 'actorId', 'action', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+        data.actorId is string && data.actorId.size() >= 1 && data.actorId.size() <= 64 &&
+        data.action is string && data.action.size() >= 1 && data.action.size() <= 64 &&
+        data.createdAt is string && data.createdAt.size() <= 64;
     }
 
     match /test/{docId} {
@@ -57,10 +105,34 @@ service cloud.firestore {
       allow delete: if isValidId(questionId);
     }
 
+    match /exam_sessions/{sessionId} {
+      allow read: if true;
+      allow create, update: if isValidId(sessionId) && isValidExamSession(incoming());
+      allow delete: if isValidId(sessionId);
+    }
+
     match /attempts/{attemptId} {
       allow read: if true;
       allow create, update: if isValidId(attemptId) && isValidExamAttempt(incoming());
       allow delete: if isValidId(attemptId);
+    }
+
+    match /attempt_answers/{answerId} {
+      allow read: if true;
+      allow create, update: if isValidId(answerId) && isValidAttemptAnswer(incoming());
+      allow delete: if isValidId(answerId);
+    }
+
+    match /violation_events/{violationId} {
+      allow read: if true;
+      allow create, update: if isValidId(violationId) && isValidViolationEvent(incoming());
+      allow delete: if isValidId(violationId);
+    }
+
+    match /exam_audit_log/{logId} {
+      allow read: if true;
+      allow create, update: if isValidId(logId) && isValidExamAuditLog(incoming());
+      allow delete: if isValidId(logId);
     }
   }
 }

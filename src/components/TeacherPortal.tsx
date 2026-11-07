@@ -1,7 +1,10 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  CalendarClock,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Database,
   Download,
   Edit3,
@@ -16,6 +19,7 @@ import {
   Search,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import {
   CERTIPORT_TOPICS,
@@ -46,6 +50,7 @@ import {
   TeacherClassAnalytics,
   TeacherStudentManager,
 } from './TeacherAnalyticsAndStudents';
+import { TeacherExamSessionsTab } from './TeacherExamSessionsTab';
 
 interface TeacherPortalProps {
   currentUser: UserAccount;
@@ -72,7 +77,7 @@ interface TeacherPortalProps {
   onUpdateDepartmentLogo?: (newLogoUrl: string) => Promise<void>;
 }
 
-type TeacherTab = 'overview' | 'questions' | 'students' | 'attempts';
+type TeacherTab = 'overview' | 'sessions' | 'questions' | 'students' | 'attempts';
 
 function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -106,6 +111,9 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   const [activeTab, setActiveTab] = useState<TeacherTab>(() => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
+    if (tabParam === 'sessions' || tabParam === 'cathi') {
+      return 'sessions';
+    }
     if (
       tabParam === 'overview' ||
       tabParam === 'questions' ||
@@ -127,6 +135,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     'ALL' | 'WITH_IMAGE' | 'WITHOUT_IMAGE'
   >('ALL');
   const [previewQuestionId, setPreviewQuestionId] = useState<string>('q1');
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
   const [previewAnswer, setPreviewAnswer] = useState<UserAnswer | undefined>(
     undefined
   );
@@ -196,13 +205,16 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     [questions, previewQuestionId, filteredQuestions]
   );
 
-  const handleSelectPreviewQuestion = (q: Question) => {
+  const handleSelectPreviewQuestion = (q: Question, openModal = true) => {
     setPreviewQuestionId(q.id);
     setPreviewAnswer(q.correctAnswer);
     setShowPreviewSolution(true);
     setQuickImageUrlInput(
       q.imageUrl && !q.imageUrl.startsWith('data:image/') ? q.imageUrl : ''
     );
+    if (openModal) {
+      setIsPreviewModalOpen(true);
+    }
   };
 
   // Xử lý gắn hoặc xóa hình ảnh trực tiếp cho câu hỏi đang chọn trong Ngân hàng đề
@@ -578,6 +590,22 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
           <button
             type="button"
+            data-testid="teacher-nav-sessions"
+            onClick={() => setActiveTab('sessions')}
+            className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
+              activeTab === 'sessions'
+                ? 'bg-teal-700 text-white shadow-2xs'
+                : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <span className="inline-flex items-center gap-2.5 truncate">
+              <CalendarClock className="w-4 h-4 shrink-0" />
+              <span className="truncate">Ca thi</span>
+            </span>
+          </button>
+
+          <button
+            type="button"
             data-testid="teacher-nav-questions"
             onClick={() => setActiveTab('questions')}
             className={`w-full px-3 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-between gap-2 cursor-pointer ${
@@ -711,6 +739,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
           </button>
           <button
             type="button"
+            data-testid="teacher-mobile-nav-sessions"
+            onClick={() => setActiveTab('sessions')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
+              activeTab === 'sessions'
+                ? 'bg-teal-700 text-white'
+                : 'text-slate-600'
+            }`}
+          >
+            Ca thi
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('questions')}
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap shrink-0 ${
               activeTab === 'questions'
@@ -748,66 +788,68 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       {/* Main Content */}
       <main className="flex-1 min-w-0 max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 sm:py-6 space-y-5">
         {/* Thanh trạng thái Quản trị viên Tổ Toán - Tin IGC Tây Ninh */}
-        <section className="bg-white border border-slate-200 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="text-xs text-slate-500">
-              Đơn vị: <strong className="text-teal-800">Tổ Toán - Tin · Trường IGC Tây Ninh</strong> ·{' '}
-              Quản trị viên:{' '}
-              <strong className="text-slate-900">{currentUser.fullName}</strong> (
-              <strong className="font-mono text-teal-800">
-                {currentUser.username}
-              </strong>
-              )
+        {activeTab !== 'sessions' && (
+          <section className="bg-white border border-slate-200 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="text-xs text-slate-500">
+                Đơn vị: <strong className="text-teal-800">Tổ Toán - Tin · Trường IGC Tây Ninh</strong> ·{' '}
+                Quản trị viên:{' '}
+                <strong className="text-slate-900">{currentUser.fullName}</strong> (
+                <strong className="font-mono text-teal-800">
+                  {currentUser.username}
+                </strong>
+                )
+              </div>
+              <h1 className="text-lg sm:text-xl font-bold text-slate-900">
+                Hệ thống Quản lý Ngân hàng Câu hỏi, Tài khoản & Khảo thí Certiport Generative AI
+              </h1>
             </div>
-            <h1 className="text-lg sm:text-xl font-bold text-slate-900">
-              Hệ thống Quản lý Ngân hàng Câu hỏi, Tài khoản & Khảo thí Certiport Generative AI
-            </h1>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            {onUpdateDepartmentLogo && (
-              <>
-                <input
-                  type="file"
-                  accept="image/*"
-                  id="admin-upload-logo-input"
-                  onChange={handleUploadDepartmentLogoFromAdmin}
-                  className="hidden"
+            <div className="flex flex-wrap items-center gap-2.5">
+              {onUpdateDepartmentLogo && (
+                <>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    id="admin-upload-logo-input"
+                    onChange={handleUploadDepartmentLogoFromAdmin}
+                    className="hidden"
+                  />
+                  <label
+                    htmlFor="admin-upload-logo-input"
+                    className="px-3.5 py-2 rounded-lg border border-teal-600/40 bg-teal-50/70 hover:bg-teal-100 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5 text-teal-700" />
+                    <span>Đổi Logo Tổ Toán - Tin</span>
+                  </label>
+                </>
+              )}
+              <button
+                type="button"
+                disabled={isResettingSeed}
+                onClick={handleResetSeed}
+                className="px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${isResettingSeed ? 'animate-spin' : ''}`}
                 />
-                <label
-                  htmlFor="admin-upload-logo-input"
-                  className="px-3.5 py-2 rounded-lg border border-teal-600/40 bg-teal-50/70 hover:bg-teal-100 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ImageIcon className="w-3.5 h-3.5 text-teal-700" />
-                  <span>Đổi Logo Tổ Toán - Tin</span>
-                </label>
-              </>
-            )}
-            <button
-              type="button"
-              disabled={isResettingSeed}
-              onClick={handleResetSeed}
-              className="px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <RefreshCw
-                className={`w-3.5 h-3.5 ${isResettingSeed ? 'animate-spin' : ''}`}
-              />
-              <span>Dọn sạch dữ liệu ảo</span>
-            </button>
-            <button
-              type="button"
-              data-testid="open-add-question-modal-btn"
-              onClick={() => {
-                setActiveTab('questions');
-                handleOpenAddModal();
-              }}
-              className="px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-xs font-bold text-white inline-flex items-center gap-1.5 shadow-2xs cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Thêm câu hỏi mới</span>
-            </button>
-          </div>
-        </section>
+                <span>Dọn sạch dữ liệu ảo</span>
+              </button>
+              <button
+                type="button"
+                data-testid="open-add-question-modal-btn"
+                onClick={() => {
+                  setActiveTab('questions');
+                  handleOpenAddModal();
+                }}
+                className="px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-xs font-bold text-white inline-flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Thêm câu hỏi mới</span>
+              </button>
+            </div>
+          </section>
+        )}
 
         {/* TAB 1: THỐNG KÊ & PHÂN TÍCH HỌC TẬP CỦA LỚP + XUẤT BÁO CÁO EXCEL 3 SHEETS */}
         {activeTab === 'overview' && (
@@ -816,6 +858,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             users={users}
             attempts={attempts}
             onNavigateToTab={setActiveTab}
+          />
+        )}
+
+        {/* TAB CA THI (BƯỚC 5/8): DANH SÁCH, TẠO CA THI, KHÓA/MỞ KHÓA, CHIẾU MÃ */}
+        {activeTab === 'sessions' && (
+          <TeacherExamSessionsTab
+            currentUser={currentUser}
+            questions={questions}
+            users={users}
           />
         )}
 
@@ -1082,296 +1133,248 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               </div>
             </section>
 
-            {/* Bố cục 2 cột: Danh sách câu hỏi (kèm nút Thêm ảnh / Sửa / Xóa) & Khung Gắn ảnh + Xem trước trực tiếp */}
-            <div
-              onPaste={handleQuickPasteImage}
-              className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start"
-            >
-              {/* Cột trái (5/12): Danh sách câu hỏi */}
-              <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl divide-y divide-slate-200 overflow-hidden">
-                {filteredQuestions.length === 0 ? (
-                  <div className="p-8 text-center space-y-3">
-                    <p className="text-sm text-slate-700 font-semibold">
-                      {questions.length === 0
-                        ? 'Ngân hàng câu hỏi hiện đang trống (đã xóa toàn bộ dữ liệu ảo).'
-                        : 'Không tìm thấy câu hỏi nào khớp với bộ lọc hiện tại.'}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Hãy bấm <strong>"Thêm câu hỏi thủ công"</strong> hoặc{' '}
-                      <strong>"Nhập từ JSON / Excel (.xlsx)"</strong> để nạp bộ đề của bạn, sau đó gắn hình ảnh trực tiếp cho từng câu hỏi.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleOpenAddModal}
-                      className="px-4 py-2 rounded-lg bg-teal-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            {/* Danh sách câu hỏi toàn chiều rộng (Bấm "Xem" mở bảng Modal giữa màn hình, không cần lướt lên trên) */}
+            <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-200 overflow-hidden shadow-2xs">
+              {filteredQuestions.length === 0 ? (
+                <div className="p-8 text-center space-y-3">
+                  <p className="text-sm text-slate-700 font-semibold">
+                    {questions.length === 0
+                      ? 'Ngân hàng câu hỏi hiện đang trống (đã xóa toàn bộ dữ liệu ảo).'
+                      : 'Không tìm thấy câu hỏi nào khớp với bộ lọc hiện tại.'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Hãy bấm <strong>"Thêm câu hỏi thủ công"</strong> hoặc{' '}
+                    <strong>"Nhập từ JSON / Excel (.xlsx)"</strong> để nạp bộ đề của bạn, sau đó gắn hình ảnh trực tiếp cho từng câu hỏi.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddModal}
+                    className="px-4 py-2 rounded-lg bg-teal-700 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Thêm câu hỏi mới kèm hình ảnh</span>
+                  </button>
+                </div>
+              ) : (
+                filteredQuestions.map((q, idx) => {
+                  const isSelected =
+                    isPreviewModalOpen && selectedPreviewQuestion?.id === q.id;
+                  return (
+                    <div
+                      key={q.id}
+                      className={`p-4 sm:px-5 transition-colors flex flex-col md:flex-row md:items-center md:justify-between gap-3 ${
+                        isSelected ? 'bg-sky-50/90' : 'hover:bg-slate-50/80'
+                      }`}
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Thêm câu hỏi mới kèm hình ảnh</span>
-                    </button>
-                  </div>
-                ) : (
-                  filteredQuestions.map((q, idx) => {
-                    const isSelected = selectedPreviewQuestion?.id === q.id;
-                    return (
-                      <div
-                        key={q.id}
-                        className={`p-4 transition-colors space-y-2 ${
-                          isSelected ? 'bg-sky-50/90' : 'hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                           <button
                             type="button"
-                            onClick={() => handleSelectPreviewQuestion(q)}
+                            onClick={() => handleSelectPreviewQuestion(q, true)}
                             className="font-mono font-bold text-teal-800 hover:underline text-left cursor-pointer"
                           >
                             Câu {idx + 1} ({q.id.toUpperCase()})
                           </button>
 
-                          <div className="flex items-center gap-1.5">
-                            {q.imageUrl ? (
-                              <span
-                                title="Câu hỏi đã có hình ảnh đề thi"
-                                className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded"
-                              >
-                                <ImageIcon className="w-3 h-3" />
-                                <span>Đã có ảnh</span>
-                              </span>
-                            ) : (
-                              <span className="text-[11px] text-slate-400">
-                                Chưa có ảnh
-                              </span>
-                            )}
-                            <span className="font-medium text-slate-700">
-                              {QUESTION_TYPE_LABELS[q.type]}
-                            </span>
-                          </div>
-                        </div>
+                          <span className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 font-semibold text-slate-700 text-[11px]">
+                            {QUESTION_TYPE_LABELS[q.type]}
+                          </span>
 
-                        <button
-                          type="button"
-                          onClick={() => handleSelectPreviewQuestion(q)}
-                          className="w-full text-left space-y-1 cursor-pointer"
-                        >
-                          <div className="text-sm font-semibold text-slate-900 line-clamp-2">
-                            {q.prompt}
-                          </div>
-                          <div className="text-xs text-slate-500">{q.topic}</div>
-                        </button>
+                          <span className="text-[11px] font-medium text-slate-500 truncate">
+                            · {q.topic}
+                          </span>
 
-                        {/* Thanh thao tác Thêm ảnh / Xem thử / Sửa / Xóa trên từng câu hỏi */}
-                        <div className="pt-1 flex flex-wrap items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            data-testid={`quick-image-btn-${q.id}`}
-                            onClick={() => {
-                              handleSelectPreviewQuestion(q);
-                              window.setTimeout(() => {
-                                quickImageFileInputRef.current?.click();
-                              }, 50);
-                            }}
-                            className="px-2.5 py-1 rounded-md border border-sky-300 bg-sky-50 hover:bg-sky-100 text-xs font-bold text-sky-900 inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <ImageIcon className="w-3 h-3 text-sky-700" />
-                            <span>{q.imageUrl ? 'Đổi ảnh' : '+ Thêm ảnh'}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleSelectPreviewQuestion(q)}
-                            className="px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Eye className="w-3 h-3" />
-                            <span>Xem</span>
-                          </button>
-                          <button
-                            type="button"
-                            data-testid={`edit-question-${q.id}`}
-                            onClick={() => handleOpenEditModal(q)}
-                            className="px-2.5 py-1 rounded-md border border-teal-300 bg-teal-50/70 hover:bg-teal-100 text-xs font-semibold text-teal-900 inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Edit3 className="w-3 h-3" />
-                            <span>Sửa</span>
-                          </button>
-                          <button
-                            type="button"
-                            data-testid={`delete-question-${q.id}`}
-                            onClick={() => setQuestionToDelete(q)}
-                            className="px-2.5 py-1 rounded-md border border-rose-200 bg-rose-50/60 hover:bg-rose-100 text-xs font-semibold text-rose-700 inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            <span>Xóa</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Cột phải (7/12): Khung Thêm Hình Ảnh Nhanh + Trình Xem trước & Kiểm thử câu hỏi trực tiếp */}
-              <div className="lg:col-span-7 space-y-4">
-                {!selectedPreviewQuestion ? (
-                  <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-4">
-                    <div className="w-12 h-12 rounded-2xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center mx-auto">
-                      <ImageIcon className="w-6 h-6" />
-                    </div>
-                    <div className="space-y-1 max-w-lg mx-auto">
-                      <h3 className="text-base font-bold text-slate-900">
-                        Sẵn sàng Tạo Đề & Đính kèm Hình ảnh Câu hỏi
-                      </h3>
-                      <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
-                        Khi bạn thêm câu hỏi mới hoặc nhập bộ đề từ file JSON / Excel (.xlsx), bạn có thể chọn bất kỳ câu hỏi nào để <strong>Tải ảnh từ máy tính</strong>, <strong>Kéo thả ảnh</strong>, bấm <strong>Ctrl+V dán ảnh chụp màn hình</strong> hoặc <strong>Nhập link ảnh</strong> trực tiếp tại khung này.
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {/* KHUNG THÊM / CẬP NHẬT HÌNH ẢNH TRỰC TIẾP CHO CÂU HỎI TRONG NGÂN HÀNG */}
-                    <section
-                      data-testid="quick-image-attachment-panel"
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        setIsQuickDraggingImage(true);
-                      }}
-                      onDragLeave={() => setIsQuickDraggingImage(false)}
-                      onDrop={async (e) => {
-                        e.preventDefault();
-                        setIsQuickDraggingImage(false);
-                        const file = e.dataTransfer.files?.[0];
-                        if (file) {
-                          await handleQuickImageFileUpload(file);
-                        }
-                      }}
-                      className={`bg-white border rounded-xl p-4 space-y-3 transition-all ${
-                        isQuickDraggingImage
-                          ? 'border-teal-600 bg-teal-50/50 ring-2 ring-teal-500/30'
-                          : 'border-slate-200'
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <ImageIcon className="w-4 h-4 text-teal-700 shrink-0" />
-                          <h3 className="text-xs sm:text-sm font-bold text-slate-900">
-                            Thêm / Cập nhật Hình ảnh cho Câu{' '}
-                            <span className="font-mono text-teal-800">
-                              {selectedPreviewQuestion.id.toUpperCase()}
-                            </span>
-                          </h3>
-                          {selectedPreviewQuestion.imageUrl ? (
-                            <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                              Đã có hình ảnh trong đề
+                          {q.imageUrl ? (
+                            <span
+                              title="Câu hỏi đã có hình ảnh đề thi"
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded"
+                            >
+                              <ImageIcon className="w-3 h-3" />
+                              <span>Đã có ảnh</span>
                             </span>
                           ) : (
-                            <span className="text-[11px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                            <span className="text-[11px] text-slate-400">
                               Chưa có ảnh
                             </span>
                           )}
                         </div>
 
-                        {selectedPreviewQuestion.imageUrl && (
-                          <button
-                            type="button"
-                            data-testid="quick-remove-image-btn"
-                            onClick={() =>
-                              handleAttachImageToSelectedQuestion(
-                                selectedPreviewQuestion,
-                                ''
-                              )
-                            }
-                            className="px-2.5 py-1 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-xs font-semibold text-rose-700 inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Xóa ảnh khỏi câu này</span>
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPreviewQuestion(q, true)}
+                          className="w-full text-left cursor-pointer group"
+                        >
+                          <div className="text-sm font-semibold text-slate-900 group-hover:text-teal-800 transition-colors line-clamp-2">
+                            {q.prompt}
+                          </div>
+                        </button>
                       </div>
 
-                      <p className="text-xs text-slate-500">
-                        Chọn tệp ảnh từ máy tính, <strong>kéo thả ảnh vào khung này</strong>, bấm{' '}
-                        <strong>Ctrl+V</strong> để dán ảnh vừa chụp màn hình đề thi, hoặc nhập đường dẫn URL ảnh bên dưới:
-                      </p>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
-                        <div className="sm:col-span-5">
-                          <input
-                            ref={quickImageFileInputRef}
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                handleQuickImageFileUpload(file);
-                              }
-                            }}
-                            className="hidden"
-                            id="quick-attach-image-file-input"
-                            data-testid="quick-attach-image-file-input"
-                          />
-                          <label
-                            htmlFor="quick-attach-image-file-input"
-                            className="w-full py-2 px-3 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                          >
-                            <Upload className="w-3.5 h-3.5" />
-                            <span>
-                              {isQuickUploadingImage
-                                ? 'Đang lưu ảnh...'
-                                : selectedPreviewQuestion.imageUrl
-                                  ? 'Tải ảnh khác thay thế'
-                                  : 'Tải ảnh từ máy tính'}
-                            </span>
-                          </label>
-                        </div>
-
-                        <div className="sm:col-span-7 flex items-center gap-2">
-                          <input
-                            type="text"
-                            data-testid="quick-attach-image-url-input"
-                            value={quickImageUrlInput}
-                            onChange={(e) => setQuickImageUrlInput(e.target.value)}
-                            placeholder="Hoặc dán link ảnh (https://... hoặc data:image/...)"
-                            className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white text-slate-900"
-                          />
-                          <button
-                            type="button"
-                            data-testid="quick-attach-image-url-btn"
-                            disabled={!quickImageUrlInput.trim()}
-                            onClick={() => {
-                              if (!quickImageUrlInput.trim()) return;
-                              handleAttachImageToSelectedQuestion(
-                                selectedPreviewQuestion,
-                                quickImageUrlInput.trim()
-                              );
-                            }}
-                            className="px-3 py-2 rounded-lg border border-teal-600 bg-teal-50 hover:bg-teal-100 disabled:opacity-40 text-xs font-bold text-teal-900 whitespace-nowrap cursor-pointer"
-                          >
-                            Gắn link ảnh
-                          </button>
-                        </div>
+                      {/* Thanh thao tác Xem (Mở Modal giữa màn hình) / Thêm ảnh / Sửa / Xóa */}
+                      <div className="flex flex-wrap items-center md:justify-end gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          data-testid={`preview-question-${q.id}`}
+                          onClick={() => handleSelectPreviewQuestion(q, true)}
+                          className="px-3 py-1.5 rounded-lg border border-teal-600 bg-teal-600 hover:bg-teal-700 text-xs font-bold text-white inline-flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Xem</span>
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`quick-image-btn-${q.id}`}
+                          onClick={() => {
+                            handleSelectPreviewQuestion(q, true);
+                            window.setTimeout(() => {
+                              quickImageFileInputRef.current?.click();
+                            }, 80);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg border border-sky-300 bg-sky-50 hover:bg-sky-100 text-xs font-bold text-sky-900 inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <ImageIcon className="w-3.5 h-3.5 text-sky-700" />
+                          <span>{q.imageUrl ? 'Đổi ảnh' : '+ Thêm ảnh'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`edit-question-${q.id}`}
+                          onClick={() => handleOpenEditModal(q)}
+                          className="px-2.5 py-1.5 rounded-lg border border-teal-300 bg-teal-50/70 hover:bg-teal-100 text-xs font-semibold text-teal-900 inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Sửa</span>
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`delete-question-${q.id}`}
+                          onClick={() => setQuestionToDelete(q)}
+                          className="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50/60 hover:bg-rose-100 text-xs font-semibold text-rose-700 inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Xóa</span>
+                        </button>
                       </div>
-                    </section>
+                    </div>
+                  );
+                })
+              )}
+            </div>
 
-                    <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
-                      <div className="text-xs text-slate-600">
-                        Đang xem câu{' '}
-                        <strong className="font-mono text-teal-800">
-                          {selectedPreviewQuestion.id.toUpperCase()}
-                        </strong>{' '}
-                        · Chấm thử:{' '}
-                        <strong className="text-slate-900">
+            {/* BẢNG MODAL GIỮA MÀN HÌNH KHI GIÁO VIÊN BẤM "XEM" CÂU HỎI TRONG NGÂN HÀNG */}
+            {isPreviewModalOpen && selectedPreviewQuestion && (() => {
+              const currentFilteredIdx = filteredQuestions.findIndex(
+                (item) => item.id === selectedPreviewQuestion.id
+              );
+              const prevQuestion =
+                currentFilteredIdx > 0
+                  ? filteredQuestions[currentFilteredIdx - 1]
+                  : null;
+              const nextQuestion =
+                currentFilteredIdx >= 0 &&
+                currentFilteredIdx < filteredQuestions.length - 1
+                  ? filteredQuestions[currentFilteredIdx + 1]
+                  : null;
+
+              return (
+                <div
+                  data-testid="teacher-question-preview-modal"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={`Xem chi tiết câu hỏi ${selectedPreviewQuestion.id.toUpperCase()}`}
+                  onPaste={handleQuickPasteImage}
+                  onClick={(e) => {
+                    if (e.target === e.currentTarget) {
+                      setIsPreviewModalOpen(false);
+                    }
+                  }}
+                  className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+                >
+                  <div className="w-full max-w-4xl max-h-[92vh] bg-slate-50 border border-slate-200 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-fade-slide-down">
+                    {/* Header cố định của Modal Xem câu hỏi */}
+                    <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-2.5 py-1 rounded-lg bg-teal-700 text-white font-mono text-xs font-bold tabular-nums">
+                          {currentFilteredIdx >= 0
+                            ? `Câu ${currentFilteredIdx + 1} / ${filteredQuestions.length}`
+                            : selectedPreviewQuestion.id.toUpperCase()}
+                        </span>
+                        <span className="font-mono text-xs font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-lg">
+                          Mã: {selectedPreviewQuestion.id.toUpperCase()}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
+                          {QUESTION_TYPE_LABELS[selectedPreviewQuestion.type]}
+                        </span>
+                        <span
+                          className={`text-xs font-bold px-2.5 py-1 rounded-lg border ${
+                            evaluateQuestion(
+                              selectedPreviewQuestion,
+                              previewAnswer
+                            )
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                              : 'bg-amber-50 border-amber-200 text-amber-800'
+                          }`}
+                        >
+                          Chấm thử:{' '}
                           {evaluateQuestion(
                             selectedPreviewQuestion,
                             previewAnswer
                           )
                             ? 'ĐÚNG 100% (1 điểm)'
                             : 'CHƯA ĐÚNG (0 điểm)'}
-                        </strong>
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          disabled={!prevQuestion}
+                          onClick={() => {
+                            if (prevQuestion) {
+                              handleSelectPreviewQuestion(prevQuestion, true);
+                            }
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Câu trước</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!nextQuestion}
+                          onClick={() => {
+                            if (nextQuestion) {
+                              handleSelectPreviewQuestion(nextQuestion, true);
+                            }
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <span className="hidden sm:inline">Câu tiếp</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="close-question-preview-modal-btn"
+                          onClick={() => setIsPreviewModalOpen(false)}
+                          className="ml-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-xs font-bold text-slate-700 inline-flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                          <span>Đóng</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Thanh công cụ thao tác nhanh trên câu hỏi đang xem */}
+                    <div className="bg-slate-100/80 border-b border-slate-200 px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                      <div className="text-xs text-slate-600 truncate">
+                        Chuyên đề: <strong className="text-slate-900">{selectedPreviewQuestion.topic}</strong>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={() =>
-                            handleOpenEditModal(selectedPreviewQuestion)
-                          }
+                          onClick={() => {
+                            setIsPreviewModalOpen(false);
+                            handleOpenEditModal(selectedPreviewQuestion);
+                          }}
                           className="px-3 py-1.5 rounded-lg bg-teal-700 text-white hover:bg-teal-800 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
@@ -1384,21 +1387,21 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                               selectedPreviewQuestion.correctAnswer
                             )
                           }
-                          className="px-3 py-1.5 rounded-lg bg-teal-50 text-teal-800 hover:bg-teal-100 text-xs font-semibold cursor-pointer"
+                          className="px-3 py-1.5 rounded-lg bg-teal-50 border border-teal-200 text-teal-800 hover:bg-teal-100 text-xs font-semibold cursor-pointer"
                         >
                           Điền sẵn Đáp án chuẩn
                         </button>
                         <button
                           type="button"
                           onClick={() => setPreviewAnswer(undefined)}
-                          className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-semibold cursor-pointer"
+                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold cursor-pointer"
                         >
                           Xóa chọn
                         </button>
                         <button
                           type="button"
                           onClick={() => setShowPreviewSolution((v) => !v)}
-                          className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           <span>
@@ -1408,16 +1411,143 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                       </div>
                     </div>
 
-                    <QuestionRenderer
-                      question={selectedPreviewQuestion}
-                      userAnswer={previewAnswer}
-                      onChangeAnswer={setPreviewAnswer}
-                      showFeedback={showPreviewSolution}
-                    />
-                  </>
-                )}
-              </div>
-            </div>
+                    {/* Nội dung cuộn bên trong Modal: Khung Gắn ảnh nhanh + Nội dung câu hỏi */}
+                    <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+                      {/* KHUNG THÊM / CẬP NHẬT HÌNH ẢNH TRỰC TIẾP CHO CÂU HỎI TRONG NGÂN HÀNG */}
+                      <section
+                        data-testid="quick-image-attachment-panel"
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setIsQuickDraggingImage(true);
+                        }}
+                        onDragLeave={() => setIsQuickDraggingImage(false)}
+                        onDrop={async (e) => {
+                          e.preventDefault();
+                          setIsQuickDraggingImage(false);
+                          const file = e.dataTransfer.files?.[0];
+                          if (file) {
+                            await handleQuickImageFileUpload(file);
+                          }
+                        }}
+                        className={`bg-white border rounded-xl p-4 space-y-3 transition-all ${
+                          isQuickDraggingImage
+                            ? 'border-teal-600 bg-teal-50/50 ring-2 ring-teal-500/30'
+                            : 'border-slate-200'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <ImageIcon className="w-4 h-4 text-teal-700 shrink-0" />
+                            <h3 className="text-xs sm:text-sm font-bold text-slate-900">
+                              Thêm / Cập nhật Hình ảnh cho Câu{' '}
+                              <span className="font-mono text-teal-800">
+                                {selectedPreviewQuestion.id.toUpperCase()}
+                              </span>
+                            </h3>
+                            {selectedPreviewQuestion.imageUrl ? (
+                              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                                Đã có hình ảnh trong đề
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-medium text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                                Chưa có ảnh
+                              </span>
+                            )}
+                          </div>
+
+                          {selectedPreviewQuestion.imageUrl && (
+                            <button
+                              type="button"
+                              data-testid="quick-remove-image-btn"
+                              onClick={() =>
+                                handleAttachImageToSelectedQuestion(
+                                  selectedPreviewQuestion,
+                                  ''
+                                )
+                              }
+                              className="px-2.5 py-1 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-xs font-semibold text-rose-700 inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Xóa ảnh khỏi câu này</span>
+                            </button>
+                          )}
+                        </div>
+
+                        <p className="text-xs text-slate-500">
+                          Chọn tệp ảnh từ máy tính, <strong>kéo thả ảnh vào khung này</strong>, bấm{' '}
+                          <strong>Ctrl+V</strong> để dán ảnh vừa chụp màn hình đề thi, hoặc nhập đường dẫn URL ảnh bên dưới:
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
+                          <div className="sm:col-span-5">
+                            <input
+                              ref={quickImageFileInputRef}
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  handleQuickImageFileUpload(file);
+                                }
+                              }}
+                              className="hidden"
+                              id="quick-attach-image-file-input"
+                              data-testid="quick-attach-image-file-input"
+                            />
+                            <label
+                              htmlFor="quick-attach-image-file-input"
+                              className="w-full py-2 px-3 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                            >
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>
+                                {isQuickUploadingImage
+                                  ? 'Đang lưu ảnh...'
+                                  : selectedPreviewQuestion.imageUrl
+                                    ? 'Tải ảnh khác thay thế'
+                                    : 'Tải ảnh từ máy tính'}
+                              </span>
+                            </label>
+                          </div>
+
+                          <div className="sm:col-span-7 flex items-center gap-2">
+                            <input
+                              type="text"
+                              data-testid="quick-attach-image-url-input"
+                              value={quickImageUrlInput}
+                              onChange={(e) => setQuickImageUrlInput(e.target.value)}
+                              placeholder="Hoặc dán link ảnh (https://... hoặc data:image/...)"
+                              className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white text-slate-900"
+                            />
+                            <button
+                              type="button"
+                              data-testid="quick-attach-image-url-btn"
+                              disabled={!quickImageUrlInput.trim()}
+                              onClick={() => {
+                                if (!quickImageUrlInput.trim()) return;
+                                handleAttachImageToSelectedQuestion(
+                                  selectedPreviewQuestion,
+                                  quickImageUrlInput.trim()
+                                );
+                              }}
+                              className="px-3 py-2 rounded-lg border border-teal-600 bg-teal-50 hover:bg-teal-100 disabled:opacity-40 text-xs font-bold text-teal-900 whitespace-nowrap cursor-pointer"
+                            >
+                              Gắn link ảnh
+                            </button>
+                          </div>
+                        </div>
+                      </section>
+
+                      <QuestionRenderer
+                        question={selectedPreviewQuestion}
+                        userAnswer={previewAnswer}
+                        onChangeAnswer={setPreviewAnswer}
+                        showFeedback={showPreviewSolution}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 

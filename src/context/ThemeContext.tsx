@@ -98,37 +98,32 @@ export const ThemeToggleButton: React.FC<ThemeToggleButtonProps> = ({
     return (
       <button
         type="button"
+        role="switch"
+        aria-checked={isDark}
         data-testid={testId}
         onClick={toggleTheme}
-        title={
+        title={isDark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
+        className={`w-full px-3 py-2 text-[14px] font-medium rounded-lg border transition-colors inline-flex items-center justify-between gap-2 cursor-pointer ${
           isDark
-            ? 'Chuyển sang Giao diện Sáng (Light Mode)'
-            : 'Chuyển sang Giao diện Tối (Dark Mode - Giảm mỏi mắt)'
-        }
-        className={`w-full px-3 py-2 text-xs font-bold rounded-xl border transition-colors inline-flex items-center justify-between gap-2 cursor-pointer ${
-          isDark
-            ? 'bg-slate-800 border-slate-700 text-amber-300 hover:bg-slate-700'
-            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+            ? 'bg-slate-800 border-slate-700 text-slate-100 hover:bg-slate-700'
+            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
         } ${className}`}
       >
-        <span className="inline-flex items-center gap-2 truncate">
+        <span className="inline-flex items-center gap-2">
           {isDark ? (
-            <Sun className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <Sun className="w-4 h-4 text-amber-400 shrink-0" />
           ) : (
-            <Moon className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+            <Moon className="w-4 h-4 text-teal-700 shrink-0" />
           )}
-          <span className="truncate">
-            {isDark ? 'Chế độ Tối (Đang bật)' : 'Chế độ Tối (Bảo vệ mắt)'}
-          </span>
+          <span>Chế độ tối</span>
         </span>
         <span
-          className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider shrink-0 ${
-            isDark
-              ? 'bg-amber-400/20 text-amber-300'
-              : 'bg-slate-100 text-slate-600'
+          aria-hidden="true"
+          className={`w-8 h-4.5 rounded-full p-0.5 transition-colors inline-flex items-center shrink-0 ${
+            isDark ? 'bg-teal-600 justify-end' : 'bg-slate-300 justify-start'
           }`}
         >
-          {isDark ? 'TỐI' : 'SÁNG'}
+          <span className="w-3.5 h-3.5 rounded-full bg-white shadow-xs" />
         </span>
       </button>
     );

@@ -79,6 +79,10 @@ export default function App() {
   );
   const [activeUserId, setActiveUserId] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
+    const customUser = params.get('user')?.trim();
+    if (customUser) {
+      return customUser;
+    }
     if (params.get('role') === 'teacher' || params.get('autostart') === '1') {
       return 'admin';
     }
@@ -123,15 +127,19 @@ export default function App() {
     }
   }, [attempts]);
 
-  // Khởi tạo kết nối Firestore, dọn dẹp dữ liệu ảo cũ và lắng nghe realtime
+  const [isLiveExamMode, setIsLiveExamMode] = useState<boolean>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    return tabParam === 'live-exam' || tabParam === 'thingay';
+  });
+
+  // Khởi tạo kết nối Firestore cho tài khoản người dùng
   useEffect(() => {
     let unsubUsers: (() => void) | null = null;
-    let unsubQuestions: (() => void) | null = null;
-    let unsubAttempts: (() => void) | null = null;
 
-    async function bootstrapFirestore() {
+    async function bootstrapUsers() {
       const isOnline = await testFirestoreConnection();
-      if (isOnline) {
+      if (isOnline && activeUserId === 'admin') {
         await ensureSeedDataInitialized();
       }
 
@@ -166,24 +174,31 @@ export default function App() {
           }
         }
       });
-
-      unsubQuestions = subscribeToQuestions((liveQuestions) => {
-        setQuestions(liveQuestions);
-      });
-
-      unsubAttempts = subscribeToAttempts((liveAttempts) => {
-        setAttempts(liveAttempts);
-      });
     }
 
-    bootstrapFirestore();
+    bootstrapUsers();
 
     return () => {
       if (unsubUsers) unsubUsers();
-      if (unsubQuestions) unsubQuestions();
-      if (unsubAttempts) unsubAttempts();
     };
-  }, []);
+  }, [activeUserId]);
+
+  // Chỉ lắng nghe bộ câu hỏi và lịch sử tự luyện khi học sinh KHÔNG ở chế độ "Thi ngay" (tránh rò rỉ đáp án qua gói tin mạng Firestore khi đang thi)
+  useEffect(() => {
+    if (isLiveExamMode && activeUserId !== 'admin') {
+      return;
+    }
+    const unsubQuestions = subscribeToQuestions((liveQuestions) => {
+      setQuestions(liveQuestions);
+    });
+    const unsubAttempts = subscribeToAttempts((liveAttempts) => {
+      setAttempts(liveAttempts);
+    });
+    return () => {
+      unsubQuestions();
+      unsubAttempts();
+    };
+  }, [isLiveExamMode, activeUserId]);
 
   const currentUser = useMemo(() => {
     if (!activeUserId) return null;
@@ -193,17 +208,48 @@ export default function App() {
       null;
     if (found) return found;
 
-    // Hỗ trợ chế độ xem giao diện học sinh qua tham số URL ?role=student ngay cả khi chưa tạo học sinh nào
-    if (activeUserId === 'student_preview') {
-      const firstRealStudent = users.find((u) => u.role === 'student');
-      if (firstRealStudent) return firstRealStudent;
+    // Hỗ trợ chế độ xem giao diện học sinh/giáo viên qua tham số URL ổn định xuyên suốt phiên
+    const params = new URLSearchParams(window.location.search);
+    const roleParam = params.get('role');
+    const classParam = params.get('class')?.trim();
+
+    if (
+      roleParam === 'teacher' ||
+      activeUserId.toLowerCase().startsWith('gv_')
+    ) {
+      const resolvedClass =
+        classParam ||
+        (activeUserId.toLowerCase() === 'gv_toan'
+          ? '12A1'
+          : activeUserId.toLowerCase() === 'gv_tin'
+            ? '12A2'
+            : '12A1');
       return {
-        id: 'student_preview',
-        username: 'HocSinh',
+        id: activeUserId,
+        username: activeUserId,
         password: '',
-        fullName: 'Chế độ Xem Giao diện Học sinh',
+        fullName: `Giáo viên (${activeUserId})`,
+        role: 'teacher' as const,
+        className: resolvedClass,
+        lastLogin: new Date().toISOString(),
+        status: 'online' as const,
+        activeStatus: 'online' as const,
+        totalStudyMinutes: 0,
+        totalStudySeconds: 0,
+      };
+    }
+
+    if (activeUserId === 'student_preview' || roleParam === 'student') {
+      return {
+        id: activeUserId,
+        username: activeUserId === 'student_preview' ? 'HocSinh' : activeUserId,
+        password: '',
+        fullName:
+          activeUserId === 'student_preview'
+            ? 'Chế độ Xem Giao diện Học sinh'
+            : `Học sinh (${activeUserId})`,
         role: 'student' as const,
-        className: 'Phòng thi Certiport GenAI',
+        className: classParam || 'Phòng thi Certiport GenAI',
         lastLogin: new Date().toISOString(),
         status: 'online' as const,
         activeStatus: 'online' as const,
@@ -593,6 +639,7 @@ export default function App() {
           onToggleBookmark={handleToggleBookmark}
           onRecordPracticeCheck={handleRecordPracticeCheck}
           onMarkQuestionMastered={handleMarkQuestionMastered}
+          onActiveTabChange={(tab) => setIsLiveExamMode(tab === 'live-exam')}
         />
       )}
     </ThemeProvider>
