@@ -33,6 +33,7 @@ import {
   updateUserActivityAndStudyTime,
 } from './services/firebase';
 import { ExamAttempt, Question, UserAccount } from './types/exam';
+import { isAdminAccount, resolveDepartmentLogoUrl } from './utils/branding';
 import { ensureCompactLogoDataUrl } from './utils/questionBankUtils';
 import { computeUpdatedWrongQuestions } from './utils/scoring';
 import { examSessionApi } from './services/examSessionApi';
@@ -41,14 +42,15 @@ const SESSION_STORAGE_KEY = 'certiport_genai_active_user_id_v3';
 const USERS_CACHE_KEY = 'certiport_genai_users_cache_v3';
 const QUESTIONS_CACHE_KEY = 'certiport_genai_questions_cache_v3';
 const ATTEMPTS_CACHE_KEY = 'certiport_genai_attempts_cache_v3';
-const DEPARTMENT_LOGO_CACHE_KEY = 'igc_toantin_logo_url_v1';
+const DEPARTMENT_LOGO_CACHE_KEY = 'igc_toantin_logo_url_v2';
 
-// Dọn sạch bộ nhớ đệm cũ có chứa dữ liệu ảo (v1/v2)
+// Dọn sạch bộ nhớ đệm cũ có chứa dữ liệu ảo (v1/v2) và cache logo cũ chưa chuẩn hóa
 try {
   localStorage.removeItem('certiport_genai_active_user_id');
   localStorage.removeItem('certiport_genai_users_cache_v1');
   localStorage.removeItem('certiport_genai_questions_cache_v1');
   localStorage.removeItem('certiport_genai_attempts_cache_v1');
+  localStorage.removeItem('igc_toantin_logo_url_v1');
 } catch {
   // Bỏ qua
 }
@@ -136,44 +138,22 @@ export default function App() {
     return tabParam === 'live-exam' || tabParam === 'thingay';
   });
 
-  // Đồng bộ thời gian thực Logo Tổ Toán - Tin trên mọi máy tính & trình duyệt
-  // Nếu máy chủ Firestore chưa có logo nhưng trình duyệt hiện tại đang lưu logo trong localStorage,
-  // tự động nén gọn và đẩy logo đó lên Firestore để các máy tính/trình duyệt khác nhận được ngay.
+  // Đồng bộ thời gian thực Logo Tổ Toán - Tin từ Firestore (nếu Quản trị viên có cập nhật logo tùy chỉnh).
+  // Khi không có bản ghi đè trên Firestore, toàn bộ hệ thống hiển thị logo chính thức mặc định đã đóng gói sẵn.
   useEffect(() => {
-    let hasAttemptedAutoHeal = false;
-
     const unsubLogo = subscribeToDepartmentLogo((remoteLogo) => {
-      if (remoteLogo && remoteLogo.trim()) {
-        const cleanedRemote = remoteLogo.trim();
+      const cleanedRemote = typeof remoteLogo === 'string' ? remoteLogo.trim() : '';
+      if (cleanedRemote) {
         setDepartmentLogoUrl(cleanedRemote);
         try {
           localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, cleanedRemote);
         } catch {
           // Bỏ qua
         }
-        return;
-      }
-
-      if (!hasAttemptedAutoHeal) {
-        hasAttemptedAutoHeal = true;
+      } else {
+        setDepartmentLogoUrl(undefined);
         try {
-          const localCachedLogo = localStorage.getItem(DEPARTMENT_LOGO_CACHE_KEY);
-          if (localCachedLogo && localCachedLogo.trim()) {
-            void (async () => {
-              const compactLogo = await ensureCompactLogoDataUrl(localCachedLogo);
-              setDepartmentLogoUrl(compactLogo || undefined);
-              try {
-                if (compactLogo) {
-                  localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, compactLogo);
-                }
-              } catch {
-                // Bỏ qua
-              }
-              if (compactLogo) {
-                await updateDepartmentLogoInFirestore(compactLogo);
-              }
-            })();
-          }
+          localStorage.removeItem(DEPARTMENT_LOGO_CACHE_KEY);
         } catch {
           // Bỏ qua
         }
@@ -390,24 +370,40 @@ export default function App() {
     [activeUserId, currentUser]
   );
 
-  const handleUpdateDepartmentLogo = useCallback(async (logoUrl: string) => {
-    const cleaned = logoUrl.trim();
-    const compact = cleaned ? await ensureCompactLogoDataUrl(cleaned) : '';
-    setDepartmentLogoUrl(compact || undefined);
-    try {
-      if (compact) {
-        localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, compact);
-      } else {
-        localStorage.removeItem(DEPARTMENT_LOGO_CACHE_KEY);
+  const canManageDepartmentLogo = useMemo(
+    () => isAdminAccount(currentUser),
+    [currentUser]
+  );
+
+  const effectiveDepartmentLogoUrl = useMemo(
+    () => resolveDepartmentLogoUrl(departmentLogoUrl),
+    [departmentLogoUrl]
+  );
+
+  const handleUpdateDepartmentLogo = useCallback(
+    async (logoUrl: string) => {
+      if (!isAdminAccount(currentUser)) {
+        throw new Error('Chỉ tài khoản quản trị (admin) mới có quyền chỉnh sửa logo.');
       }
-    } catch {
-      // Bỏ qua
-    }
-    setUsers((prev) =>
-      prev.map((u) => (u.id === 'admin' ? { ...u, logoUrl: compact } : u))
-    );
-    await updateDepartmentLogoInFirestore(compact);
-  }, []);
+      const cleaned = logoUrl.trim();
+      const compact = cleaned ? await ensureCompactLogoDataUrl(cleaned) : '';
+      setDepartmentLogoUrl(compact || undefined);
+      try {
+        if (compact) {
+          localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, compact);
+        } else {
+          localStorage.removeItem(DEPARTMENT_LOGO_CACHE_KEY);
+        }
+      } catch {
+        // Bỏ qua
+      }
+      setUsers((prev) =>
+        prev.map((u) => (u.id === 'admin' ? { ...u, logoUrl: compact } : u))
+      );
+      await updateDepartmentLogoInFirestore(compact);
+    },
+    [currentUser]
+  );
 
   // Optimistic + Firestore sync cho Bookmark
   const handleToggleBookmark = useCallback(
@@ -664,8 +660,7 @@ export default function App() {
           errorMessage={loginError}
           seededUsers={users}
           questionsCount={questions.length}
-          departmentLogoUrl={departmentLogoUrl}
-          onUpdateDepartmentLogo={handleUpdateDepartmentLogo}
+          departmentLogoUrl={effectiveDepartmentLogoUrl}
         />
       ) : currentUser.role === 'teacher' ? (
         <TeacherPortal
@@ -673,8 +668,11 @@ export default function App() {
           users={users}
           questions={questions}
           attempts={attempts}
-          departmentLogoUrl={departmentLogoUrl}
-          onUpdateDepartmentLogo={handleUpdateDepartmentLogo}
+          departmentLogoUrl={effectiveDepartmentLogoUrl}
+          hasCustomDepartmentLogo={Boolean(departmentLogoUrl)}
+          onUpdateDepartmentLogo={
+            canManageDepartmentLogo ? handleUpdateDepartmentLogo : undefined
+          }
           onLogout={handleLogout}
           onSaveStudent={handleSaveStudent}
           onBatchSaveStudents={handleBatchSaveStudents}
@@ -691,7 +689,7 @@ export default function App() {
           currentUser={currentUser}
           questions={questions}
           attempts={attempts}
-          departmentLogoUrl={departmentLogoUrl}
+          departmentLogoUrl={effectiveDepartmentLogoUrl}
           onLogout={handleLogout}
           onSaveAttempt={handleSaveAttempt}
           onSyncStudyTime={handleSyncStudyTime}

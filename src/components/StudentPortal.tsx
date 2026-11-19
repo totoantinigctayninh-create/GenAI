@@ -52,7 +52,7 @@ import {
   getAvatarInitial,
 } from '../utils/uiFormatting';
 import { ThemeToggleButton } from '../context/ThemeContext';
-import { IgcToanTinDefaultEmblem } from './LoginScreen';
+import { resolveDepartmentLogoUrl } from '../utils/branding';
 import { LiveExamTab } from './LiveExamTab';
 import { MockExamView } from './MockExamView';
 import { QuestionFontScale, QuestionRenderer } from './QuestionRenderer';
@@ -663,16 +663,12 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 }}
                 className="flex items-center gap-2.5 min-w-0"
               >
-                <div className="keep-light w-9 h-9 rounded-full bg-white border border-teal-200 flex items-center justify-center shrink-0 overflow-hidden">
-                  {departmentLogoUrl ? (
-                    <img
-                      src={departmentLogoUrl}
-                      alt="Logo Tổ Toán - Tin"
-                      className="w-full h-full object-contain rounded-full p-0.5"
-                    />
-                  ) : (
-                    <IgcToanTinDefaultEmblem className="w-7 h-7" />
-                  )}
+                <div className="keep-light w-9 h-9 rounded-full bg-white border border-teal-200 flex items-center justify-center shrink-0 overflow-hidden p-0.5">
+                  <img
+                    src={resolveDepartmentLogoUrl(departmentLogoUrl)}
+                    alt="Logo Tổ Toán - Tin"
+                    className="w-full h-full object-contain rounded-full"
+                  />
                 </div>
                 <span className="text-[15px] font-bold tracking-tight text-teal-900 dark:text-teal-300 whitespace-nowrap">
                   Tổ Toán - Tin - IGC
@@ -839,9 +835,16 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 e.preventDefault();
                 setActiveTab('dashboard');
               }}
-              className="text-[15px] font-bold tracking-tight text-teal-900 dark:text-teal-300"
+              className="flex items-center gap-2 text-[15px] font-bold tracking-tight text-teal-900 dark:text-teal-300"
             >
-              Tổ Toán - Tin - IGC
+              <span className="keep-light w-7 h-7 rounded-full bg-white border border-teal-200 flex items-center justify-center shrink-0 overflow-hidden p-0.5">
+                <img
+                  src={resolveDepartmentLogoUrl(departmentLogoUrl)}
+                  alt="Logo Tổ Toán - Tin"
+                  className="w-full h-full object-contain rounded-full"
+                />
+              </span>
+              <span>Tổ Toán - Tin - IGC</span>
             </a>
             <button
               type="button"
@@ -870,8 +873,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               <div className="w-64 max-w-[82vw] h-full bg-[var(--color-bg-surface)] border-r border-[var(--color-border-subtle)] flex flex-col justify-between p-4">
                 <div className="space-y-4">
                   <div className="flex items-center justify-between pb-3 border-b border-[var(--color-border-subtle)]">
-                    <span className="text-[15px] font-bold text-teal-900 dark:text-teal-300">
-                      Tổ Toán - Tin - IGC
+                    <span className="flex items-center gap-2 text-[15px] font-bold text-teal-900 dark:text-teal-300">
+                      <span className="keep-light w-7 h-7 rounded-full bg-white border border-teal-200 flex items-center justify-center shrink-0 overflow-hidden p-0.5">
+                        <img
+                          src={resolveDepartmentLogoUrl(departmentLogoUrl)}
+                          alt="Logo Tổ Toán - Tin"
+                          className="w-full h-full object-contain rounded-full"
+                        />
+                      </span>
+                      <span>Tổ Toán - Tin - IGC</span>
                     </span>
                     <button
                       type="button"

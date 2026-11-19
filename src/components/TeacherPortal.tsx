@@ -43,7 +43,7 @@ import {
 import { evaluateQuestion } from '../utils/scoring';
 import { buildClassReportWorkbookBytes } from '../utils/teacherAnalytics';
 import { ThemeToggleButton } from '../context/ThemeContext';
-import { IgcToanTinDefaultEmblem } from './LoginScreen';
+import { isAdminAccount, resolveDepartmentLogoUrl } from '../utils/branding';
 import { QuestionEditorModal } from './QuestionEditorModal';
 import { QuestionRenderer } from './QuestionRenderer';
 import { formatStudyDuration } from './StudentPortal';
@@ -75,6 +75,7 @@ interface TeacherPortalProps {
   ) => Promise<void>;
   onResetSeedData: () => Promise<void>;
   departmentLogoUrl?: string;
+  hasCustomDepartmentLogo?: boolean;
   onUpdateDepartmentLogo?: (newLogoUrl: string) => Promise<void>;
 }
 
@@ -107,6 +108,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   onBatchSaveQuestions,
   onResetSeedData,
   departmentLogoUrl = '',
+  hasCustomDepartmentLogo = false,
   onUpdateDepartmentLogo,
 }) => {
   const [activeTab, setActiveTab] = useState<TeacherTab>(() => {
@@ -474,11 +476,16 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     }
   };
 
+  const canManageDepartmentLogo = Boolean(
+    onUpdateDepartmentLogo && isAdminAccount(currentUser)
+  );
+  const resolvedLogoUrl = resolveDepartmentLogoUrl(departmentLogoUrl);
+
   const handleUploadDepartmentLogoFromAdmin = async (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = e.target.files?.[0];
-    if (!file || !onUpdateDepartmentLogo) return;
+    if (!file || !canManageDepartmentLogo || !onUpdateDepartmentLogo) return;
     try {
       const base64 = await compressLogoFileToBase64(file);
       await onUpdateDepartmentLogo(base64);
@@ -499,13 +506,33 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     }
   };
 
+  const handleResetDepartmentLogoToDefault = async () => {
+    if (!canManageDepartmentLogo || !onUpdateDepartmentLogo) return;
+    try {
+      await onUpdateDepartmentLogo('');
+      setBankStatusMessage({
+        type: 'success',
+        text: 'Đã khôi phục Logo chính thức mặc định của Tổ Toán - Tin · Trường IGC Tây Ninh.',
+      });
+    } catch (err) {
+      setBankStatusMessage({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Không thể khôi phục logo mặc định. Vui lòng thử lại.',
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
-      {onUpdateDepartmentLogo && (
+      {canManageDepartmentLogo && (
         <input
           type="file"
           accept="image/*"
           id="admin-upload-logo-input"
+          data-testid="admin-upload-logo-input"
           onChange={handleUploadDepartmentLogoFromAdmin}
           className="hidden"
         />
@@ -526,16 +553,12 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             }}
             className="flex items-center gap-2.5 group min-w-0 flex-1"
           >
-            <div className="keep-light w-10 h-10 rounded-full bg-white border border-teal-200 flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
-              {departmentLogoUrl ? (
-                <img
-                  src={departmentLogoUrl}
-                  alt="Logo Tổ Toán - Tin"
-                  className="w-full h-full object-contain rounded-full p-0.5"
-                />
-              ) : (
-                <IgcToanTinDefaultEmblem className="w-8 h-8" />
-              )}
+            <div className="keep-light w-10 h-10 rounded-full bg-white border border-teal-200 flex items-center justify-center shrink-0 overflow-hidden shadow-2xs p-0.5">
+              <img
+                src={resolvedLogoUrl}
+                alt="Logo Tổ Toán - Tin"
+                className="w-full h-full object-contain rounded-full"
+              />
             </div>
             <div className="min-w-0">
               <div className="text-sm font-extrabold tracking-tight text-teal-900 truncate">
@@ -546,10 +569,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               </div>
             </div>
           </a>
-          {onUpdateDepartmentLogo && (
+          {canManageDepartmentLogo && (
             <label
               htmlFor="admin-upload-logo-input"
-              title="Đổi Logo Tổ Toán - Tin (đồng bộ mọi máy tính)"
+              data-testid="sidebar-edit-logo-btn"
+              title="Đổi Logo Tổ Toán - Tin (Chỉ tài khoản quản trị)"
               className="p-1.5 rounded-lg text-slate-400 hover:text-teal-700 hover:bg-teal-50 transition-colors cursor-pointer shrink-0"
             >
               <ImageIcon className="w-3.5 h-3.5" />
@@ -727,9 +751,16 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               e.preventDefault();
               setActiveTab('overview');
             }}
-            className="text-sm font-extrabold tracking-tight text-teal-800"
+            className="flex items-center gap-2 text-sm font-extrabold tracking-tight text-teal-800 min-w-0"
           >
-            Tổ Toán - Tin · IGC Tây Ninh
+            <span className="keep-light w-7 h-7 rounded-full bg-white border border-teal-200 flex items-center justify-center shrink-0 overflow-hidden p-0.5">
+              <img
+                src={resolvedLogoUrl}
+                alt="Logo Tổ Toán - Tin"
+                className="w-full h-full object-contain rounded-full"
+              />
+            </span>
+            <span className="truncate">Tổ Toán - Tin · IGC Tây Ninh</span>
           </a>
           <div className="flex items-center gap-2">
             <ThemeToggleButton
@@ -827,14 +858,28 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              {onUpdateDepartmentLogo && (
-                <label
-                  htmlFor="admin-upload-logo-input"
-                  className="px-3.5 py-2 rounded-lg border border-teal-600/40 bg-teal-50/70 hover:bg-teal-100 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <ImageIcon className="w-3.5 h-3.5 text-teal-700" />
-                  <span>Đổi Logo Tổ Toán - Tin</span>
-                </label>
+              {canManageDepartmentLogo && (
+                <>
+                  <label
+                    htmlFor="admin-upload-logo-input"
+                    data-testid="overview-edit-logo-btn"
+                    className="px-3.5 py-2 rounded-lg border border-teal-600/40 bg-teal-50/70 hover:bg-teal-100 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5 text-teal-700" />
+                    <span>Đổi Logo Tổ Toán - Tin</span>
+                  </label>
+                  {hasCustomDepartmentLogo && (
+                    <button
+                      type="button"
+                      data-testid="overview-reset-logo-btn"
+                      onClick={handleResetDepartmentLogoToDefault}
+                      className="px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Logo mặc định</span>
+                    </button>
+                  )}
+                </>
               )}
               <button
                 type="button"
