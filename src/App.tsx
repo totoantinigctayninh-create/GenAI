@@ -22,6 +22,7 @@ import {
   saveQuestionToFirestore,
   saveStudentAccount,
   subscribeToAttempts,
+  subscribeToDepartmentLogo,
   subscribeToQuestions,
   subscribeToUsers,
   syncExamWrongQuestionsToFirestore,
@@ -32,6 +33,7 @@ import {
   updateUserActivityAndStudyTime,
 } from './services/firebase';
 import { ExamAttempt, Question, UserAccount } from './types/exam';
+import { ensureCompactLogoDataUrl } from './utils/questionBankUtils';
 import { computeUpdatedWrongQuestions } from './utils/scoring';
 import { examSessionApi } from './services/examSessionApi';
 
@@ -134,53 +136,100 @@ export default function App() {
     return tabParam === 'live-exam' || tabParam === 'thingay';
   });
 
+  // Đồng bộ thời gian thực Logo Tổ Toán - Tin trên mọi máy tính & trình duyệt
+  // Nếu máy chủ Firestore chưa có logo nhưng trình duyệt hiện tại đang lưu logo trong localStorage,
+  // tự động nén gọn và đẩy logo đó lên Firestore để các máy tính/trình duyệt khác nhận được ngay.
+  useEffect(() => {
+    let hasAttemptedAutoHeal = false;
+
+    const unsubLogo = subscribeToDepartmentLogo((remoteLogo) => {
+      if (remoteLogo && remoteLogo.trim()) {
+        const cleanedRemote = remoteLogo.trim();
+        setDepartmentLogoUrl(cleanedRemote);
+        try {
+          localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, cleanedRemote);
+        } catch {
+          // Bỏ qua
+        }
+        return;
+      }
+
+      if (!hasAttemptedAutoHeal) {
+        hasAttemptedAutoHeal = true;
+        try {
+          const localCachedLogo = localStorage.getItem(DEPARTMENT_LOGO_CACHE_KEY);
+          if (localCachedLogo && localCachedLogo.trim()) {
+            void (async () => {
+              const compactLogo = await ensureCompactLogoDataUrl(localCachedLogo);
+              setDepartmentLogoUrl(compactLogo || undefined);
+              try {
+                if (compactLogo) {
+                  localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, compactLogo);
+                }
+              } catch {
+                // Bỏ qua
+              }
+              if (compactLogo) {
+                await updateDepartmentLogoInFirestore(compactLogo);
+              }
+            })();
+          }
+        } catch {
+          // Bỏ qua
+        }
+      }
+    });
+
+    return () => {
+      unsubLogo();
+    };
+  }, []);
+
   // Khởi tạo kết nối Firestore cho tài khoản người dùng
   useEffect(() => {
-    let unsubUsers: (() => void) | null = null;
+    let isMounted = true;
+    const unsubUsers = subscribeToUsers((liveUsers) => {
+      if (!isMounted) return;
+      const mergedMap = new Map<string, UserAccount>();
+      for (const su of SEED_USERS) mergedMap.set(su.id, su);
+      for (const lu of liveUsers) {
+        if (isLegacyVirtualUser(lu)) continue;
+        const seedMatch = SEED_USERS.find((s) => s.id === lu.id);
+        mergedMap.set(lu.id, {
+          ...seedMatch,
+          ...lu,
+          bookmarkedQuestions: lu.bookmarkedQuestions ?? [],
+          wrongQuestions: lu.wrongQuestions ?? [],
+          masteredQuestions: lu.masteredQuestions ?? [],
+          practiceProgress: lu.practiceProgress ?? {},
+        });
+      }
+      const mergedList = Array.from(mergedMap.values());
+      setUsers(mergedList);
+      const adminDoc = mergedList.find((u) => u.id === 'admin');
+      if (adminDoc && typeof adminDoc.logoUrl === 'string' && adminDoc.logoUrl.trim()) {
+        const cleanedLogo = adminDoc.logoUrl.trim();
+        setDepartmentLogoUrl(cleanedLogo);
+        try {
+          localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, cleanedLogo);
+        } catch {
+          // Bỏ qua
+        }
+      }
+    });
 
     async function bootstrapUsers() {
       const isOnline = await testFirestoreConnection();
-      if (isOnline && activeUserId === 'admin') {
+      if (isMounted && isOnline && activeUserId === 'admin') {
         await ensureSeedDataInitialized();
       }
-
-      unsubUsers = subscribeToUsers((liveUsers) => {
-        const mergedMap = new Map<string, UserAccount>();
-        for (const su of SEED_USERS) mergedMap.set(su.id, su);
-        for (const lu of liveUsers) {
-          if (isLegacyVirtualUser(lu)) continue;
-          const seedMatch = SEED_USERS.find((s) => s.id === lu.id);
-          mergedMap.set(lu.id, {
-            ...seedMatch,
-            ...lu,
-            bookmarkedQuestions: lu.bookmarkedQuestions ?? [],
-            wrongQuestions: lu.wrongQuestions ?? [],
-            masteredQuestions: lu.masteredQuestions ?? [],
-            practiceProgress: lu.practiceProgress ?? {},
-          });
-        }
-        const mergedList = Array.from(mergedMap.values());
-        setUsers(mergedList);
-        const adminDoc = mergedList.find((u) => u.id === 'admin');
-        if (adminDoc && typeof adminDoc.logoUrl === 'string') {
-          setDepartmentLogoUrl(adminDoc.logoUrl || undefined);
-          try {
-            if (adminDoc.logoUrl) {
-              localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, adminDoc.logoUrl);
-            } else {
-              localStorage.removeItem(DEPARTMENT_LOGO_CACHE_KEY);
-            }
-          } catch {
-            // Bỏ qua
-          }
-        }
-      });
     }
 
-    bootstrapUsers();
+    void bootstrapUsers();
 
     return () => {
-      if (unsubUsers) unsubUsers();
+      isMounted = false;
+      unsubUsers();
     };
   }, [activeUserId]);
 
@@ -343,10 +392,11 @@ export default function App() {
 
   const handleUpdateDepartmentLogo = useCallback(async (logoUrl: string) => {
     const cleaned = logoUrl.trim();
-    setDepartmentLogoUrl(cleaned || undefined);
+    const compact = cleaned ? await ensureCompactLogoDataUrl(cleaned) : '';
+    setDepartmentLogoUrl(compact || undefined);
     try {
-      if (cleaned) {
-        localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, cleaned);
+      if (compact) {
+        localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, compact);
       } else {
         localStorage.removeItem(DEPARTMENT_LOGO_CACHE_KEY);
       }
@@ -354,9 +404,9 @@ export default function App() {
       // Bỏ qua
     }
     setUsers((prev) =>
-      prev.map((u) => (u.id === 'admin' ? { ...u, logoUrl: cleaned } : u))
+      prev.map((u) => (u.id === 'admin' ? { ...u, logoUrl: compact } : u))
     );
-    await updateDepartmentLogoInFirestore(cleaned);
+    await updateDepartmentLogoInFirestore(compact);
   }, []);
 
   // Optimistic + Firestore sync cho Bookmark

@@ -1751,7 +1751,7 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
                             </span>
                           </div>
 
-                          <p className="text-[15px] font-medium text-[var(--color-text-primary)]">
+                          <p className="text-[15px] font-medium text-[var(--color-text-primary)] whitespace-pre-wrap break-words">
                             {qItem.prompt}
                           </p>
 
@@ -1794,7 +1794,7 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
                           </div>
 
                           {qItem.explanation && (
-                            <p className="text-xs sm:text-sm text-slate-600 pt-1">
+                            <p className="text-xs sm:text-sm text-slate-600 pt-1 whitespace-pre-wrap break-words">
                               <strong>Giải thích:</strong> {qItem.explanation}
                             </p>
                           )}

@@ -1530,7 +1530,7 @@ export const TeacherSessionResultsOverview: React.FC<
                       #{q.orderNumber}
                     </td>
                     <td className="py-2.5 px-4">
-                      <div className="font-semibold text-slate-900 line-clamp-1">
+                      <div className="font-semibold text-slate-900 line-clamp-2 whitespace-pre-line">
                         {q.prompt}
                       </div>
                       <div className="text-xs text-slate-500 mt-0.5">
@@ -2059,7 +2059,7 @@ export const TeacherSessionResultsOverview: React.FC<
               <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
                 <div
                   data-testid="drawer-question-prompt"
-                  className="text-sm font-bold text-slate-900 leading-relaxed"
+                  className="text-sm font-bold text-slate-900 leading-relaxed whitespace-pre-wrap break-words"
                 >
                   {activeQuestionDrawerData.prompt}
                 </div>
@@ -2070,7 +2070,7 @@ export const TeacherSessionResultsOverview: React.FC<
                   </strong>
                 </div>
                 {activeQuestionDrawerData.explanation && (
-                  <p className="text-xs text-slate-600 leading-relaxed">
+                  <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap break-words">
                     <strong>Giải thích:</strong>{' '}
                     {activeQuestionDrawerData.explanation}
                   </p>
@@ -2643,7 +2643,7 @@ export const TeacherSessionResultsOverview: React.FC<
                         <td className="py-1.5 px-2 font-mono font-bold">
                           #{hq.orderNumber}
                         </td>
-                        <td className="py-1.5 px-2">{hq.prompt}</td>
+                        <td className="py-1.5 px-2 whitespace-pre-wrap break-words">{hq.prompt}</td>
                         <td className="py-1.5 px-2">{hq.shortTopicLabel}</td>
                         <td className="py-1.5 px-2 text-right font-bold tabular-nums">
                           {hq.accuracyPercent}% ({hq.correctCount}/

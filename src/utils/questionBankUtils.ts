@@ -289,13 +289,13 @@ export function createDraftFromQuestion(question: Question): QuestionFormDraft {
  */
 export function buildQuestionFromDraft(draft: QuestionFormDraft): Question {
   const cleanId = draft.id.trim().replace(/[^a-zA-Z0-9_-]/g, '') || `q_${Date.now()}`;
-  const prompt = draft.prompt.trim();
+  const prompt = draft.prompt.replace(/\r\n?/g, '\n').trim();
   if (!prompt) {
     throw new Error('Vui lòng nhập nội dung câu hỏi (Prompt).');
   }
 
   const explanation =
-    draft.explanation.trim() ||
+    draft.explanation.replace(/\r\n?/g, '\n').trim() ||
     'Đáp án chuẩn theo tài liệu khung năng lực Certiport Generative AI.';
 
   const baseQuestion: Question = {
@@ -493,14 +493,17 @@ export function normalizeImportedQuestion(raw: Record<string, unknown>, fallback
       ? raw.examSet.trim()
       : 'Ngân hàng chung';
 
-  const prompt = typeof raw.prompt === 'string' ? raw.prompt.trim() : '';
+  const prompt =
+    typeof raw.prompt === 'string'
+      ? raw.prompt.replace(/\r\n?/g, '\n').trim()
+      : '';
   if (!prompt) {
     throw new Error(`Câu hỏi "${id}" thiếu nội dung câu hỏi (prompt).`);
   }
 
   const explanation =
     typeof raw.explanation === 'string' && raw.explanation.trim()
-      ? raw.explanation.trim()
+      ? raw.explanation.replace(/\r\n?/g, '\n').trim()
       : 'Đáp án chuẩn theo tài liệu Certiport Generative AI.';
 
   const question: Question = {
@@ -1192,6 +1195,92 @@ export async function compressImageFileToBase64(file: File | Blob): Promise<stri
         resolve(compressed);
       };
       img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Nén chuỗi DataURL của Logo về kích thước tối ưu (tối đa 360x360px, < 150KB)
+ * để luôn đảm bảo lưu vừa giới hạn 1MB/document của Firestore và tải tức thì trên mọi máy tính/trình duyệt.
+ */
+export async function ensureCompactLogoDataUrl(dataUrl: string): Promise<string> {
+  const trimmed = dataUrl.trim();
+  if (!trimmed || !trimmed.startsWith('data:image/')) {
+    return trimmed;
+  }
+  if (typeof document === 'undefined' || typeof Image === 'undefined') {
+    return trimmed;
+  }
+  // Nếu là SVG nhỏ (< 100KB) thì giữ nguyên
+  if (trimmed.startsWith('data:image/svg+xml') && trimmed.length < 100_000) {
+    return trimmed;
+  }
+  // Nếu ảnh đã đủ gọn (< 90KB) thì giữ nguyên
+  if (trimmed.length < 90_000) {
+    return trimmed;
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onerror = () => resolve(trimmed.slice(0, 750_000));
+    img.onload = () => {
+      const maxDim = 360;
+      let { width, height } = img;
+      if (!width || !height) {
+        resolve(trimmed);
+        return;
+      }
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.max(1, Math.round((height * maxDim) / width));
+          width = maxDim;
+        } else {
+          width = Math.max(1, Math.round((width * maxDim) / height));
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(trimmed);
+        return;
+      }
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Ưu tiên PNG giữ nền trong suốt nếu dung lượng sau nén < 180KB
+      const pngUrl = canvas.toDataURL('image/png');
+      if (pngUrl.length < 180_000) {
+        resolve(pngUrl);
+        return;
+      }
+
+      // Nếu PNG vẫn lớn, vẽ trên nền trắng và xuất JPEG chất lượng cao
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      const jpegUrl = canvas.toDataURL('image/jpeg', 0.86);
+      resolve(jpegUrl);
+    };
+    img.src = trimmed;
+  });
+}
+
+/**
+ * Đọc và nén tệp Logo từ máy tính sang chuỗi Base64 nhỏ gọn để đồng bộ Firestore đa thiết bị.
+ */
+export async function compressLogoFileToBase64(file: File | Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(new Error('Không thể đọc tệp hình ảnh logo đã chọn.'));
+    reader.onload = async () => {
+      const rawDataUrl = String(reader.result || '');
+      const compact = await ensureCompactLogoDataUrl(rawDataUrl);
+      resolve(compact);
     };
     reader.readAsDataURL(file);
   });

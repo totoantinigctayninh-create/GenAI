@@ -123,3 +123,28 @@ test('SheetJS exportQuestionsToExcelBytes and parseQuestionsFromExcelBytes round
     assert.equal(evaluateQuestion(q, q.correctAnswer), true);
   }
 });
+
+test('buildQuestionFromDraft and JSON round-trip preserve Enter line breaks in prompt and explanation', () => {
+  const draft = createEmptyQuestionDraft(100);
+  draft.prompt = 'Tình huống:\r\nDòng 1: Học sinh dùng AI.\n\nDòng 2: Chọn đáp án đúng nhất.';
+  draft.explanation = 'Ý 1: Kiểm chứng nguồn.\r\nÝ 2: Không nhập dữ liệu nhạy cảm.';
+  draft.mcqOptions = [
+    { id: 'A', text: 'Phương án A', isCorrect: true },
+    { id: 'B', text: 'Phương án B', isCorrect: false },
+  ];
+
+  const built = buildQuestionFromDraft(draft);
+  assert.equal(
+    built.prompt,
+    'Tình huống:\nDòng 1: Học sinh dùng AI.\n\nDòng 2: Chọn đáp án đúng nhất.'
+  );
+  assert.equal(
+    built.explanation,
+    'Ý 1: Kiểm chứng nguồn.\nÝ 2: Không nhập dữ liệu nhạy cảm.'
+  );
+
+  const parsed = parseQuestionsFromJson(serializeQuestionsToJson([built]));
+  assert.equal(parsed[0].prompt, built.prompt);
+  assert.equal(parsed[0].explanation, built.explanation);
+});
+

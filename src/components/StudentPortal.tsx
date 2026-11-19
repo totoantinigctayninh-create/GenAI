@@ -2060,7 +2060,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 {QUESTION_TYPE_LABELS[q.type]}
                               </span>
                             </div>
-                            <p className="text-xs font-medium text-slate-900 line-clamp-2">
+                            <p className="text-xs font-medium text-slate-900 line-clamp-2 whitespace-pre-line">
                               {q.prompt}
                             </p>
                           </button>
@@ -2481,11 +2481,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                             {qItem.isCorrect ? 'Đúng' : 'Chưa đúng'}
                           </span>
                         </div>
-                        <p className="text-sm font-semibold text-slate-900">
+                        <p className="text-sm font-semibold text-slate-900 whitespace-pre-wrap break-words">
                           {qItem.prompt}
                         </p>
                         {qItem.explanation && (
-                          <p className="text-xs text-slate-700 bg-white p-2.5 rounded border border-slate-200">
+                          <p className="text-xs text-slate-700 bg-white p-2.5 rounded border border-slate-200 whitespace-pre-wrap break-words">
                             <strong>Giải thích:</strong> {qItem.explanation}
                           </p>
                         )}
@@ -2654,7 +2654,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                               {qRes.isCorrect ? 'ĐÚNG 100% (1/1)' : 'SAI (0/1)'}
                             </span>
                           </div>
-                          <p className="text-sm font-semibold text-slate-900">
+                          <p className="text-sm font-semibold text-slate-900 whitespace-pre-wrap break-words">
                             {qRes.prompt}
                           </p>
                           {fullQuestion && (

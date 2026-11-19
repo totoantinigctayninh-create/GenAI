@@ -348,10 +348,10 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
       {/* Nội dung câu hỏi chính (Hệ thống khoảng cách 8pt chuẩn mực) */}
       <div className="p-4 sm:p-6 space-y-4">
         <div className="space-y-3">
-          <p className={`${promptTextSizeClass} font-bold text-slate-900 tracking-tight`}>
+          <p className={`${promptTextSizeClass} font-bold text-slate-900 tracking-tight whitespace-pre-wrap break-words`}>
             {question.prompt}
             {question.type === 'mcq_multiple' && !promptHasChooseNote && (
-              <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-teal-50 text-teal-800 border border-teal-200 align-middle">
+              <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-teal-50 text-teal-800 border border-teal-200 align-middle whitespace-nowrap">
                 Chọn {maxAllowedMultiple}
               </span>
             )}
@@ -499,7 +499,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                       {letter}
                     </span>
                     <span
-                      className={
+                      className={`whitespace-pre-wrap break-words ${
                         showFeedback && isOptionCorrect
                           ? 'font-bold text-emerald-950'
                           : showFeedback && isSelected && !isOptionCorrect
@@ -507,7 +507,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                             : isSelected
                               ? 'font-semibold text-slate-900'
                               : ''
-                      }
+                      }`}
                     >
                       {opt.text}
                     </span>
@@ -611,7 +611,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                       {letter}
                     </span>
                     <span
-                      className={
+                      className={`whitespace-pre-wrap break-words ${
                         showFeedback && isOptionCorrect
                           ? 'font-bold text-emerald-950'
                           : showFeedback && isSelected && !isOptionCorrect
@@ -619,7 +619,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                             : isSelected
                               ? 'font-semibold text-slate-900'
                               : ''
-                      }
+                      }`}
                     >
                       {opt.text}
                     </span>
@@ -693,7 +693,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                       >
                         {idx + 1}
                       </span>
-                      <span className={`${optionTextSizeClass} text-slate-800 font-medium`}>
+                      <span className={`${optionTextSizeClass} text-slate-800 font-medium whitespace-pre-wrap break-words`}>
                         {sub.statement}
                       </span>
                     </div>
@@ -822,7 +822,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <GripVertical className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="leading-snug">{rightText}</span>
+                        <span className="leading-snug whitespace-pre-wrap break-words">{rightText}</span>
                       </div>
                       {isUsed && (
                         <span className="text-[10px] font-mono font-bold bg-teal-700 text-white px-1.5 py-0.5 rounded shrink-0">
@@ -880,7 +880,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                       >
                         {idx + 1}
                       </span>
-                      <span className="text-xs sm:text-[13px] font-semibold leading-snug">
+                      <span className="text-xs sm:text-[13px] font-semibold leading-snug whitespace-pre-wrap break-words">
                         {pair.left}
                       </span>
                     </button>
@@ -940,7 +940,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                           }}
                           className="flex items-center justify-between gap-1.5 min-w-0"
                         >
-                          <span className="text-xs sm:text-[13px] font-semibold text-teal-950 leading-snug">
+                          <span className="text-xs sm:text-[13px] font-semibold text-teal-950 leading-snug whitespace-pre-wrap break-words">
                             {matchedRight}
                           </span>
                           {!readOnly && (
@@ -1039,7 +1039,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <GripVertical className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="text-xs sm:text-[13px] font-medium text-slate-800 leading-snug">
+                        <span className="text-xs sm:text-[13px] font-medium text-slate-800 leading-snug whitespace-pre-wrap break-words">
                           {step.text}
                         </span>
                       </div>
@@ -1145,7 +1145,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                               >
                                 {slotIdx + 1}
                               </span>
-                              <span className="text-xs sm:text-[13px] font-semibold text-slate-900 leading-snug">
+                              <span className="text-xs sm:text-[13px] font-semibold text-slate-900 leading-snug whitespace-pre-wrap break-words">
                                 {stepObj.text}
                               </span>
                             </div>
@@ -1293,7 +1293,7 @@ export const QuestionRenderer: React.FC<QuestionRendererProps> = ({
                     </span>
                   </div>
 
-                  <p className="text-xs sm:text-sm text-slate-800 leading-relaxed font-medium pl-1">
+                  <p className="text-xs sm:text-sm text-slate-800 leading-relaxed font-medium pl-1 whitespace-pre-wrap break-words">
                     {question.explanation ||
                       'Nắm vững từ khóa trong ngữ cảnh câu hỏi và đối chiếu trực tiếp với nguyên tắc an toàn, chính xác của mô hình Generative AI.'}
                   </p>

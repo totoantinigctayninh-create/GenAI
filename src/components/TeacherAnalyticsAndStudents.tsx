@@ -445,7 +445,7 @@ export const TeacherClassAnalytics: React.FC<TeacherClassAnalyticsProps> = ({
                       </div>
                     </td>
                     <td className="py-3.5 px-4 max-w-md">
-                      <div className="font-semibold text-slate-900 line-clamp-2">
+                      <div className="font-semibold text-slate-900 line-clamp-2 whitespace-pre-line">
                         {item.question.prompt}
                       </div>
                       <div className="text-xs text-slate-500 mt-0.5">

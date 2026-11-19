@@ -431,14 +431,14 @@ export const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
                 <textarea
                   id="q-editor-prompt"
                   data-testid="question-editor-prompt-input"
-                  rows={3}
+                  rows={4}
                   required
                   value={draft.prompt}
                   onChange={(e) =>
                     setDraft((prev) => ({ ...prev, prompt: e.target.value }))
                   }
-                  placeholder="Nhập đề bài câu hỏi tiếng Việt sát chuẩn đề thi Certiport Generative AI..."
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-teal-600 focus:outline-none text-slate-900"
+                  placeholder="Nhập đề bài câu hỏi tiếng Việt sát chuẩn đề thi Certiport Generative AI (hỗ trợ Enter xuống dòng)..."
+                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:border-teal-600 focus:outline-none text-slate-900 resize-y"
                 />
               </div>
 
@@ -996,13 +996,13 @@ export const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
             <textarea
               id="q-editor-explanation"
               data-testid="question-editor-explanation-input"
-              rows={2}
+              rows={3}
               value={draft.explanation}
               onChange={(e) =>
                 setDraft((prev) => ({ ...prev, explanation: e.target.value }))
               }
               placeholder="Giải thích ngắn gọn vì sao đáp án trên là chính xác để hiển thị cho học sinh khi ôn tập..."
-              className="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 text-slate-900"
+              className="w-full px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-slate-300 text-slate-900 resize-y"
             />
           </div>
 

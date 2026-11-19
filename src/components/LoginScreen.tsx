@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Lock, LogIn, ShieldCheck, UserCheck } from 'lucide-react';
 import { ThemeToggleButton } from '../context/ThemeContext';
 import { UserAccount } from '../types/exam';
-import { compressImageFileToBase64 } from '../utils/questionBankUtils';
+import { compressLogoFileToBase64 } from '../utils/questionBankUtils';
 
 interface LoginScreenProps {
   onLogin: (username: string, password: string) => Promise<void>;
@@ -144,7 +144,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     const file = e.target.files?.[0];
     if (!file || !onUpdateDepartmentLogo) return;
     try {
-      const base64 = await compressImageFileToBase64(file);
+      const base64 = await compressLogoFileToBase64(file);
       await onUpdateDepartmentLogo(base64);
     } catch {
       // Bỏ qua nếu ảnh không hợp lệ

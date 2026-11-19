@@ -31,7 +31,17 @@ import {
 } from '../types/exam';
 import { computeUpdatedWrongQuestions } from '../utils/scoring';
 
+export const DEPARTMENT_BRANDING_DOC_ID = 'system_department_logo';
+
+export function isSystemBrandingUser(u: UserAccount): boolean {
+  return (
+    u.id === DEPARTMENT_BRANDING_DOC_ID ||
+    u.username === DEPARTMENT_BRANDING_DOC_ID
+  );
+}
+
 export function isLegacyVirtualUser(u: UserAccount): boolean {
+  if (isSystemBrandingUser(u)) return true;
   return (
     LEGACY_SEED_USER_IDS.includes(u.id) &&
     Boolean(!u.createdAt || u.createdAt.startsWith('2026-10-20T08:'))
@@ -182,10 +192,10 @@ export async function ensureSeedDataInitialized(): Promise<{
       await setDoc(doc(db, 'users', DEFAULT_ADMIN_ACCOUNT.id), DEFAULT_ADMIN_ACCOUNT);
     }
 
-    // Xóa các học sinh ảo cũ (HS001, HS002 từ seed data)
+    // Xóa các học sinh ảo cũ (HS001, HS002 từ seed data) nhưng tuyệt đối không xóa doc lưu logo hệ thống
     for (const d of usersSnap.docs) {
       const u = d.data() as UserAccount;
-      if (isLegacyVirtualUser(u)) {
+      if (!isSystemBrandingUser(u) && isLegacyVirtualUser(u)) {
         await deleteDoc(doc(db, 'users', d.id));
       }
     }
@@ -226,17 +236,29 @@ export async function ensureSeedDataInitialized(): Promise<{
 
 /**
  * Xóa toàn bộ dữ liệu ảo / làm sạch Ngân hàng câu hỏi khi giáo viên yêu cầu
+ * (Giữ nguyên Logo Tổ Toán - Tin đã tải lên trên Firestore)
  */
 export async function resetSeedDataToDefault(): Promise<void> {
   try {
     const usersSnap = await getDocs(collection(db, 'users'));
+    let preservedLogoUrl: string | undefined;
     for (const d of usersSnap.docs) {
       const u = d.data() as UserAccount;
-      if (u.role === 'student' && isLegacyVirtualUser(u)) {
+      if (typeof u.logoUrl === 'string' && u.logoUrl.trim()) {
+        preservedLogoUrl = u.logoUrl.trim();
+      }
+      if (u.role === 'student' && !isSystemBrandingUser(u) && isLegacyVirtualUser(u)) {
         await deleteDoc(doc(db, 'users', d.id));
       }
     }
-    await setDoc(doc(db, 'users', DEFAULT_ADMIN_ACCOUNT.id), DEFAULT_ADMIN_ACCOUNT);
+    await setDoc(
+      doc(db, 'users', DEFAULT_ADMIN_ACCOUNT.id),
+      {
+        ...DEFAULT_ADMIN_ACCOUNT,
+        ...(preservedLogoUrl ? { logoUrl: preservedLogoUrl } : {}),
+      },
+      { merge: true }
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'users');
   }
@@ -605,10 +627,37 @@ export async function saveStudentAccount(account: UserAccount): Promise<void> {
 }
 
 /**
- * Lưu hoặc cập nhật Logo Tổ Toán - Tin · Trường IGC Tây Ninh vào tài khoản quản trị gốc (`users/admin`) trên Firestore
+ * Lưu hoặc cập nhật Logo Tổ Toán - Tin · Trường IGC Tây Ninh lên Firestore
+ * (lưu đồng thời vào doc chuyên biệt `users/__department_logo__` và `users/admin` để đồng bộ mọi máy tính/trình duyệt)
  */
 export async function updateDepartmentLogoInFirestore(logoUrl: string): Promise<void> {
-  const path = `users/${DEFAULT_ADMIN_ACCOUNT.id}`;
+  const cleaned = logoUrl.trim();
+  const brandingPath = `users/${DEPARTMENT_BRANDING_DOC_ID}`;
+  const adminPath = `users/${DEFAULT_ADMIN_ACCOUNT.id}`;
+
+  try {
+    await setDoc(
+      doc(db, 'users', DEPARTMENT_BRANDING_DOC_ID),
+      {
+        id: DEPARTMENT_BRANDING_DOC_ID,
+        username: DEPARTMENT_BRANDING_DOC_ID,
+        password: 'igc_branding_protected',
+        fullName: 'Logo Tổ Toán - Tin · Trường IGC Tây Ninh',
+        role: 'teacher',
+        className: 'Tổ Toán - Tin · Trường IGC Tây Ninh',
+        status: 'online',
+        activeStatus: 'online',
+        totalStudyMinutes: 0,
+        totalStudySeconds: 0,
+        lastLogin: new Date().toISOString(),
+        logoUrl: cleaned,
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, brandingPath);
+  }
+
   try {
     const snap = await getDoc(doc(db, 'users', DEFAULT_ADMIN_ACCOUNT.id));
     const current: UserAccount = snap.exists()
@@ -623,13 +672,92 @@ export async function updateDepartmentLogoInFirestore(logoUrl: string): Promise<
         password: current.password || DEFAULT_ADMIN_ACCOUNT.password,
         fullName: current.fullName || DEFAULT_ADMIN_ACCOUNT.fullName,
         role: 'teacher',
-        logoUrl: logoUrl.trim(),
+        logoUrl: cleaned,
       },
       { merge: true }
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    handleFirestoreError(error, OperationType.UPDATE, adminPath);
   }
+}
+
+/**
+ * Lắng nghe thời gian thực Logo Tổ Toán - Tin từ Firestore trên mọi máy tính và trình duyệt
+ */
+export function subscribeToDepartmentLogo(
+  onLogoChange: (logoUrl: string | undefined) => void
+): () => void {
+  let brandingLogo: string | undefined;
+  let adminLogo: string | undefined;
+  let brandingLoaded = false;
+  let adminLoaded = false;
+
+  const emitResolvedLogo = () => {
+    const resolved =
+      (brandingLogo && brandingLogo.trim()) ||
+      (adminLogo && adminLogo.trim()) ||
+      undefined;
+    if (resolved || (brandingLoaded && adminLoaded)) {
+      onLogoChange(resolved);
+    }
+  };
+
+  const unsubBranding = onSnapshot(
+    doc(db, 'users', DEPARTMENT_BRANDING_DOC_ID),
+    (snap) => {
+      brandingLoaded = true;
+      if (snap.exists()) {
+        const data = snap.data() as UserAccount;
+        brandingLogo =
+          typeof data.logoUrl === 'string' && data.logoUrl.trim()
+            ? data.logoUrl.trim()
+            : undefined;
+      } else {
+        brandingLogo = undefined;
+      }
+      emitResolvedLogo();
+    },
+    (error) => {
+      brandingLoaded = true;
+      handleFirestoreError(
+        error,
+        OperationType.GET,
+        `users/${DEPARTMENT_BRANDING_DOC_ID}`
+      );
+      emitResolvedLogo();
+    }
+  );
+
+  const unsubAdmin = onSnapshot(
+    doc(db, 'users', DEFAULT_ADMIN_ACCOUNT.id),
+    (snap) => {
+      adminLoaded = true;
+      if (snap.exists()) {
+        const data = snap.data() as UserAccount;
+        adminLogo =
+          typeof data.logoUrl === 'string' && data.logoUrl.trim()
+            ? data.logoUrl.trim()
+            : undefined;
+      } else {
+        adminLogo = undefined;
+      }
+      emitResolvedLogo();
+    },
+    (error) => {
+      adminLoaded = true;
+      handleFirestoreError(
+        error,
+        OperationType.GET,
+        `users/${DEFAULT_ADMIN_ACCOUNT.id}`
+      );
+      emitResolvedLogo();
+    }
+  );
+
+  return () => {
+    unsubBranding();
+    unsubAdmin();
+  };
 }
 
 export async function deleteStudentAccount(userId: string): Promise<void> {
@@ -725,8 +853,8 @@ export async function saveQuestionToFirestore(question: Question): Promise<void>
   const rawPayload: Record<string, unknown> = {
     ...question,
     id: sanitizedId,
-    prompt: question.prompt.trim().slice(0, 2000),
-    explanation: question.explanation.trim().slice(0, 2000),
+    prompt: question.prompt.replace(/\r\n?/g, '\n').trim().slice(0, 2000),
+    explanation: question.explanation.replace(/\r\n?/g, '\n').trim().slice(0, 2000),
   };
 
   // Loại bỏ các trường undefined để Firestore không báo lỗi

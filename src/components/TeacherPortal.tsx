@@ -34,6 +34,7 @@ import {
   applyImageToQuestion,
   buildSampleExcelWorkbookBytes,
   compressImageFileToBase64,
+  compressLogoFileToBase64,
   exportQuestionsToExcelBytes,
   parseQuestionsFromExcelBytes,
   parseQuestionsFromJson,
@@ -479,11 +480,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     const file = e.target.files?.[0];
     if (!file || !onUpdateDepartmentLogo) return;
     try {
-      const base64 = await compressImageFileToBase64(file);
+      const base64 = await compressLogoFileToBase64(file);
       await onUpdateDepartmentLogo(base64);
       setBankStatusMessage({
         type: 'success',
-        text: 'Đã cập nhật Logo Tổ Toán - Tin · Trường IGC Tây Ninh thành công!',
+        text: 'Đã cập nhật & đồng bộ Logo Tổ Toán - Tin · Trường IGC Tây Ninh lên tất cả thiết bị!',
       });
     } catch (err) {
       setBankStatusMessage({
@@ -493,11 +494,22 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             ? err.message
             : 'Không thể tải ảnh logo. Vui lòng thử lại.',
       });
+    } finally {
+      e.target.value = '';
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      {onUpdateDepartmentLogo && (
+        <input
+          type="file"
+          accept="image/*"
+          id="admin-upload-logo-input"
+          onChange={handleUploadDepartmentLogoFromAdmin}
+          className="hidden"
+        />
+      )}
       {/* LEFT SIDEBAR CHO DESKTOP (GIÁO VIÊN / QUẢN TRỊ VIÊN) */}
       <aside
         data-testid="teacher-sidebar"
@@ -505,14 +517,14 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         className="hidden md:flex md:flex-col md:w-64 lg:w-68 md:shrink-0 bg-white border-r border-slate-200 md:sticky md:top-0 md:h-screen z-30 select-none"
       >
         {/* Zone 1: Brand Wordmark & Logo Tổ Toán - Tin IGC Tây Ninh */}
-        <div className="px-4 py-4 border-b border-slate-200">
+        <div className="px-4 py-4 border-b border-slate-200 flex items-center justify-between gap-2">
           <a
             href="#teacher-home"
             onClick={(e) => {
               e.preventDefault();
               setActiveTab('overview');
             }}
-            className="flex items-center gap-2.5 group min-w-0"
+            className="flex items-center gap-2.5 group min-w-0 flex-1"
           >
             <div className="keep-light w-10 h-10 rounded-full bg-white border border-teal-200 flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
               {departmentLogoUrl ? (
@@ -534,6 +546,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
               </div>
             </div>
           </a>
+          {onUpdateDepartmentLogo && (
+            <label
+              htmlFor="admin-upload-logo-input"
+              title="Đổi Logo Tổ Toán - Tin (đồng bộ mọi máy tính)"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-teal-700 hover:bg-teal-50 transition-colors cursor-pointer shrink-0"
+            >
+              <ImageIcon className="w-3.5 h-3.5" />
+            </label>
+          )}
         </div>
 
         {/* Thông tin Quản trị viên trong Sidebar */}
@@ -807,22 +828,13 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
 
             <div className="flex flex-wrap items-center gap-2.5">
               {onUpdateDepartmentLogo && (
-                <>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    id="admin-upload-logo-input"
-                    onChange={handleUploadDepartmentLogoFromAdmin}
-                    className="hidden"
-                  />
-                  <label
-                    htmlFor="admin-upload-logo-input"
-                    className="px-3.5 py-2 rounded-lg border border-teal-600/40 bg-teal-50/70 hover:bg-teal-100 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <ImageIcon className="w-3.5 h-3.5 text-teal-700" />
-                    <span>Đổi Logo Tổ Toán - Tin</span>
-                  </label>
-                </>
+                <label
+                  htmlFor="admin-upload-logo-input"
+                  className="px-3.5 py-2 rounded-lg border border-teal-600/40 bg-teal-50/70 hover:bg-teal-100 text-xs font-bold text-teal-900 inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-teal-700" />
+                  <span>Đổi Logo Tổ Toán - Tin</span>
+                </label>
               )}
               <button
                 type="button"
@@ -1204,7 +1216,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                           onClick={() => handleSelectPreviewQuestion(q, true)}
                           className="w-full text-left cursor-pointer group"
                         >
-                          <div className="text-sm font-semibold text-slate-900 group-hover:text-teal-800 transition-colors line-clamp-2">
+                          <div className="text-sm font-semibold text-slate-900 group-hover:text-teal-800 transition-colors line-clamp-2 whitespace-pre-line">
                             {q.prompt}
                           </div>
                         </button>
