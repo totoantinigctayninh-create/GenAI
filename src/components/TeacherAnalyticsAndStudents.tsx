@@ -112,8 +112,8 @@ export const TeacherClassAnalytics: React.FC<TeacherClassAnalyticsProps> = ({
     return Math.round((totalPracticedRatio / analytics.studentRows.length) * 100);
   }, [analytics.studentRows, questions.length]);
 
-  const handleExportClassReportExcel = () => {
-    const bytes = buildClassReportWorkbookBytes(questions, users, attempts);
+  const handleExportClassReportExcel = async () => {
+    const bytes = await buildClassReportWorkbookBytes(questions, users, attempts);
     const blob = new Blob([bytes as unknown as BlobPart], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
@@ -767,8 +767,8 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
   };
 
   // Tải file Excel mẫu nhập danh sách học sinh
-  const handleDownloadStudentSampleExcel = () => {
-    const bytes = buildSampleStudentImportExcelBytes();
+  const handleDownloadStudentSampleExcel = async () => {
+    const bytes = await buildSampleStudentImportExcelBytes();
     const blob = new Blob([bytes as unknown as BlobPart], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
@@ -790,7 +790,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
 
     try {
       const buf = await file.arrayBuffer();
-      const importedStudents = parseStudentsFromExcelBytes(buf);
+      const importedStudents = await parseStudentsFromExcelBytes(buf);
       await onBatchSaveStudents(importedStudents);
       setStatusBanner({
         type: 'success',
@@ -813,8 +813,8 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
   };
 
   // Xuất Báo cáo Kết quả Lớp học (.xlsx) 3 Sheet
-  const handleExportClassReportExcel = () => {
-    const bytes = buildClassReportWorkbookBytes(questions, users, attempts);
+  const handleExportClassReportExcel = async () => {
+    const bytes = await buildClassReportWorkbookBytes(questions, users, attempts);
     const blob = new Blob([bytes as unknown as BlobPart], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
@@ -1203,7 +1203,84 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Giao diện thẻ xếp dọc cho điện thoại (< md) - Tài khoản Giáo viên */}
+          <div className="md:hidden divide-y divide-slate-200">
+            {filteredTeachers.map((teacher) => {
+              const isRootAdmin =
+                teacher.id.toLowerCase() === 'admin' ||
+                teacher.username.toLowerCase() === 'admin';
+              return (
+                <div
+                  key={teacher.id}
+                  data-testid={`mobile-teacher-card-${teacher.id}`}
+                  className="p-4 space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono font-bold text-sm text-indigo-800">
+                          {teacher.username}
+                        </span>
+                        <span className="text-xs font-mono text-slate-400">
+                          (MK: {teacher.password})
+                        </span>
+                        {isRootAdmin && (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-bold">
+                            Quản trị gốc
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-bold text-slate-900 text-sm mt-0.5">
+                        {teacher.fullName}
+                      </div>
+                      <div className="text-xs text-slate-600 mt-0.5">
+                        {teacher.className || 'Tổ Toán - Tin · Trường IGC Tây Ninh'}
+                      </div>
+                    </div>
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-50 border border-indigo-200 text-[11px] font-bold text-indigo-800 shrink-0">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Giáo viên</span>
+                    </span>
+                  </div>
+
+                  <div className="text-xs text-slate-500 font-mono">
+                    Đăng nhập gần nhất:{' '}
+                    {teacher.lastLogin
+                      ? new Date(teacher.lastLogin).toLocaleString('vi-VN')
+                      : 'Chưa đăng nhập'}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPasswordStudent(teacher);
+                        setNewPasswordValue(teacher.password);
+                      }}
+                      className={`min-h-[44px] px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 cursor-pointer ${
+                        isRootAdmin ? 'col-span-2' : ''
+                      }`}
+                    >
+                      <KeyRound className="w-4 h-4" />
+                      <span>Đặt lại mật khẩu</span>
+                    </button>
+                    {!isRootAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteStudentTarget(teacher)}
+                        className="min-h-[44px] px-3 py-2 rounded-xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100 text-xs font-semibold text-rose-700 inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>Xóa tài khoản</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
@@ -1370,7 +1447,148 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Giao diện thẻ xếp dọc cho điện thoại (< md) - Danh sách Tài khoản Học sinh */}
+        <div
+          data-testid="mobile-student-cards-list"
+          className="md:hidden divide-y divide-slate-200"
+        >
+          {paginatedStudentRows.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-500">
+              Không tìm thấy tài khoản học sinh nào khớp với bộ lọc.
+            </div>
+          ) : (
+            paginatedStudentRows.map((row) => {
+              const st = row.student;
+              const isOnline =
+                st.activeStatus === 'studying' ||
+                st.activeStatus === 'online' ||
+                st.status === 'studying' ||
+                st.status === 'online';
+
+              return (
+                <div
+                  key={st.id}
+                  data-testid="mobile-student-card"
+                  className="p-4 space-y-3 tabular-nums"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono font-bold text-sm text-teal-800">
+                          {st.username}
+                        </span>
+                        <span className="text-xs font-mono text-slate-400">
+                          (MK: {st.password})
+                        </span>
+                      </div>
+                      <div className="font-bold text-slate-900 text-sm mt-0.5">
+                        {st.fullName}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {st.className || 'Lớp Luyện thi Certiport'}
+                      </div>
+                    </div>
+
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold border shrink-0 ${
+                        isOnline
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          isOnline ? 'bg-emerald-600' : 'bg-slate-400'
+                        }`}
+                      />
+                      {isOnline ? 'Trực tuyến' : 'Ngoại tuyến'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs">
+                    <div>
+                      <div className="text-[11px] text-slate-500">Tiến độ luyện tập</div>
+                      <div className="font-mono font-bold text-teal-800">
+                        {row.practicedCount}/{questions.length} câu
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-500">Kho câu sai</div>
+                      <div
+                        className={`font-mono font-bold ${
+                          row.wrongPoolCount > 0 ? 'text-rose-700' : 'text-emerald-700'
+                        }`}
+                      >
+                        {row.wrongPoolCount} câu sai
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-500">Tổng TG ôn tập</div>
+                      <div className="font-mono font-semibold text-slate-900">
+                        {formatStudyDuration(st.totalStudySeconds || 0)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-500">Thi thử ({row.attemptCount} đề)</div>
+                      <div className="font-mono font-bold text-slate-900">
+                        {row.attemptCount > 0
+                          ? `Cao: ${row.highestScore1000} · TB: ${row.averageScore1000}`
+                          : 'Chưa thi thử'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      data-testid={`mobile-view-student-history-${st.id}`}
+                      onClick={() => setHistoryStudentRow(row)}
+                      className="min-h-[44px] px-3 py-2 rounded-xl border border-teal-300 bg-teal-50/70 hover:bg-teal-100 text-xs font-semibold text-teal-900 inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <History className="w-4 h-4" />
+                      <span>Xem tiến độ ({row.attemptCount})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid={`mobile-change-password-${st.id}`}
+                      onClick={() => {
+                        setPasswordStudent(st);
+                        setNewPasswordValue(st.password);
+                      }}
+                      className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <KeyRound className="w-4 h-4" />
+                      <span>Đặt lại mật khẩu</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid={`mobile-reset-progress-${st.id}`}
+                      onClick={() => setResetStudentTarget(st)}
+                      className="min-h-[44px] px-3 py-2 rounded-xl border border-amber-300 bg-amber-50/70 hover:bg-amber-100 text-xs font-semibold text-amber-900 inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Reset bài</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid={`mobile-delete-student-${st.id}`}
+                      onClick={() => setDeleteStudentTarget(st)}
+                      className="min-h-[44px] px-3 py-2 rounded-xl border border-rose-200 bg-rose-50/60 hover:bg-rose-100 text-xs font-semibold text-rose-700 inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>Xóa</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
@@ -1571,11 +1789,11 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
           role="dialog"
           aria-modal="true"
           aria-labelledby="student-history-modal-title"
-          className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4 overflow-y-auto"
+          className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto"
         >
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-xl overflow-hidden my-auto">
-            <div className="px-6 py-4 bg-sky-50/80 border-b border-slate-200 flex items-center justify-between gap-4">
-              <div>
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-4xl w-full max-h-[90dvh] flex flex-col shadow-xl overflow-hidden my-auto">
+            <div className="sticky top-0 z-10 px-4 sm:px-6 py-3.5 sm:py-4 bg-sky-50/90 border-b border-slate-200 flex items-center justify-between gap-3 shrink-0">
+              <div className="min-w-0">
                 <div className="text-xs font-bold uppercase tracking-wider text-teal-800">
                   Hồ sơ Học tập Chi tiết · Mã HS:{' '}
                   {historyStudentRow.student.username}
@@ -1595,13 +1813,13 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                 type="button"
                 onClick={() => setHistoryStudentRow(null)}
                 aria-label="Đóng cửa sổ lịch sử học sinh"
-                className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 cursor-pointer"
+                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 space-y-6 overflow-y-auto flex-1 tabular-nums">
+            <div className="p-4 sm:p-6 space-y-6 overflow-y-auto overscroll-contain flex-1 min-h-0 tabular-nums">
               {/* Tóm tắt 4 chỉ số của học sinh */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
@@ -1692,66 +1910,78 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                   </div>
                 ) : (
                   <div className="border border-slate-200 rounded-xl overflow-hidden">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
-                          <th className="py-2.5 px-3">Ngày giờ nộp</th>
-                          <th className="py-2.5 px-3">Bộ đề / Chế độ</th>
-                          <th className="py-2.5 px-3">Số câu đúng</th>
-                          <th className="py-2.5 px-3">Điểm Certiport</th>
-                          <th className="py-2.5 px-3">Thời gian làm</th>
-                          <th className="py-2.5 px-3">Kết quả</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200 text-xs">
-                        {historyStudentRow.studentAttempts.map((att) => {
-                          const cScore =
-                            att.certiportScore ??
-                            Math.round(
-                              ((att.score ?? att.correctCount) /
-                                Math.max(1, att.totalQuestions)) *
-                                1000
+                    <div className="w-full overflow-x-auto -mx-1 px-1">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
+                            <th className="py-2.5 px-3">Ngày giờ nộp</th>
+                            <th className="py-2.5 px-3">Bộ đề / Chế độ</th>
+                            <th className="py-2.5 px-3">Số câu đúng</th>
+                            <th className="py-2.5 px-3">Điểm Certiport</th>
+                            <th className="py-2.5 px-3">Thời gian làm</th>
+                            <th className="py-2.5 px-3">Kết quả</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 text-xs">
+                          {historyStudentRow.studentAttempts.map((att) => {
+                            const cScore =
+                              att.certiportScore ??
+                              Math.round(
+                                ((att.score ?? att.correctCount) /
+                                  Math.max(1, att.totalQuestions)) *
+                                  1000
+                              );
+                            const passed = cScore >= 700;
+                            return (
+                              <tr key={att.id}>
+                                <td className="py-2.5 px-3 font-mono text-slate-600 whitespace-nowrap">
+                                  {new Date(att.completedAt).toLocaleString(
+                                    'vi-VN'
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3 font-medium text-slate-900">
+                                  {att.mode || att.examSet}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono font-bold text-slate-800 whitespace-nowrap">
+                                  {att.score ?? att.correctCount}/
+                                  {att.totalQuestions}
+                                </td>
+                                <td className="py-2.5 px-3 font-mono font-bold text-teal-800 whitespace-nowrap">
+                                  {cScore} / 1000
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-slate-600 whitespace-nowrap">
+                                  {formatStudyDuration(att.durationSeconds)}
+                                </td>
+                                <td className="py-2.5 px-3 font-bold whitespace-nowrap">
+                                  {passed ? (
+                                    <span className="text-emerald-700">
+                                      PASS (&ge;700)
+                                    </span>
+                                  ) : (
+                                    <span className="text-rose-700">
+                                      FAIL (&lt;700)
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
                             );
-                          const passed = cScore >= 700;
-                          return (
-                            <tr key={att.id}>
-                              <td className="py-2.5 px-3 font-mono text-slate-600">
-                                {new Date(att.completedAt).toLocaleString(
-                                  'vi-VN'
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3 font-medium text-slate-900">
-                                {att.mode || att.examSet}
-                              </td>
-                              <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
-                                {att.score ?? att.correctCount}/
-                                {att.totalQuestions}
-                              </td>
-                              <td className="py-2.5 px-3 font-mono font-bold text-teal-800">
-                                {cScore} / 1000
-                              </td>
-                              <td className="py-2.5 px-3 font-mono text-slate-600">
-                                {formatStudyDuration(att.durationSeconds)}
-                              </td>
-                              <td className="py-2.5 px-3 font-bold">
-                                {passed ? (
-                                  <span className="text-emerald-700">
-                                    PASS (&ge;700)
-                                  </span>
-                                ) : (
-                                  <span className="text-rose-700">
-                                    FAIL (&lt;700)
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="sticky bottom-0 z-10 px-4 sm:px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setHistoryStudentRow(null)}
+                className="min-h-[44px] px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold cursor-pointer"
+              >
+                Đóng hồ sơ
+              </button>
             </div>
           </div>
         </div>
@@ -1763,51 +1993,53 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
           role="dialog"
           aria-modal="true"
           aria-labelledby="change-password-modal-title"
-          className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
         >
           <form
             onSubmit={handleConfirmChangePassword}
-            className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4"
+            className="bg-white border border-slate-200 rounded-2xl max-w-md w-full max-h-[90dvh] flex flex-col overflow-hidden shadow-xl"
           >
-            <div className="space-y-1">
-              <div className="text-xs font-bold uppercase tracking-wider text-teal-800 flex items-center gap-1.5">
-                <KeyRound className="w-4 h-4" />
-                <span>
-                  Cập nhật Mật khẩu{' '}
-                  {passwordStudent.role === 'teacher' ? 'Giáo viên' : 'Học sinh'}
-                </span>
+            <div className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <div className="space-y-1">
+                <div className="text-xs font-bold uppercase tracking-wider text-teal-800 flex items-center gap-1.5">
+                  <KeyRound className="w-4 h-4" />
+                  <span>
+                    Cập nhật Mật khẩu{' '}
+                    {passwordStudent.role === 'teacher' ? 'Giáo viên' : 'Học sinh'}
+                  </span>
+                </div>
+                <h3
+                  id="change-password-modal-title"
+                  className="text-base font-bold text-slate-900"
+                >
+                  Đổi mật khẩu cho {passwordStudent.fullName} (
+                  {passwordStudent.username})
+                </h3>
               </div>
-              <h3
-                id="change-password-modal-title"
-                className="text-base font-bold text-slate-900"
-              >
-                Đổi mật khẩu cho {passwordStudent.fullName} (
-                {passwordStudent.username})
-              </h3>
+
+              <div>
+                <label
+                  htmlFor="student-new-password-input"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Mật khẩu mới
+                </label>
+                <input
+                  id="student-new-password-input"
+                  type="text"
+                  required
+                  value={newPasswordValue}
+                  onChange={(e) => setNewPasswordValue(e.target.value)}
+                  className="w-full px-3 py-2.5 text-base sm:text-sm font-mono rounded-lg border border-slate-300"
+                />
+              </div>
             </div>
 
-            <div>
-              <label
-                htmlFor="student-new-password-input"
-                className="block text-xs font-semibold text-slate-700 mb-1"
-              >
-                Mật khẩu mới
-              </label>
-              <input
-                id="student-new-password-input"
-                type="text"
-                required
-                value={newPasswordValue}
-                onChange={(e) => setNewPasswordValue(e.target.value)}
-                className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-300"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
+            <div className="sticky bottom-0 px-5 sm:px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setPasswordStudent(null)}
-                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 cursor-pointer"
               >
                 Hủy
               </button>
@@ -1815,7 +2047,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                 type="submit"
                 data-testid="confirm-change-password-btn"
                 disabled={isProcessingAction}
-                className="px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer"
               >
                 {isProcessingAction ? 'Đang lưu...' : 'Lưu mật khẩu mới'}
               </button>
@@ -1830,30 +2062,32 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
           role="dialog"
           aria-modal="true"
           aria-labelledby="reset-student-modal-title"
-          className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
         >
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
-            <div className="flex items-start gap-3">
-              <RotateCcw className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <h3
-                  id="reset-student-modal-title"
-                  className="text-base font-bold text-slate-900"
-                >
-                  Reset dữ liệu làm bài của {resetStudentTarget.fullName} (
-                  {resetStudentTarget.username})?
-                </h3>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Thao tác này sẽ đưa thời gian ôn tập, tiến độ luyện tập, kho câu sai và lịch sử thi thử của học sinh này về 0 để học sinh bắt đầu ôn luyện lại từ đầu. Tài khoản đăng nhập vẫn được giữ nguyên.
-                </p>
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full max-h-[90dvh] flex flex-col overflow-hidden shadow-xl">
+            <div className="p-5 sm:p-6 overflow-y-auto flex-1 min-h-0">
+              <div className="flex items-start gap-3">
+                <RotateCcw className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h3
+                    id="reset-student-modal-title"
+                    className="text-base font-bold text-slate-900"
+                  >
+                    Reset dữ liệu làm bài của {resetStudentTarget.fullName} (
+                    {resetStudentTarget.username})?
+                  </h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Thao tác này sẽ đưa thời gian ôn tập, tiến độ luyện tập, kho câu sai và lịch sử thi thử của học sinh này về 0 để học sinh bắt đầu ôn luyện lại từ đầu. Tài khoản đăng nhập vẫn được giữ nguyên.
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-2">
+            <div className="sticky bottom-0 px-5 sm:px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setResetStudentTarget(null)}
-                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 cursor-pointer"
               >
                 Hủy
               </button>
@@ -1862,7 +2096,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                 data-testid="confirm-reset-progress-btn"
                 disabled={isProcessingAction}
                 onClick={handleConfirmResetProgress}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer"
               >
                 {isProcessingAction
                   ? 'Đang reset...'
@@ -1879,34 +2113,36 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-student-modal-title"
-          className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
         >
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <h3
-                  id="delete-student-modal-title"
-                  className="text-base font-bold text-slate-900"
-                >
-                  Xóa tài khoản{' '}
-                  {deleteStudentTarget.role === 'teacher'
-                    ? 'Giáo viên'
-                    : 'Học sinh'}{' '}
-                  {deleteStudentTarget.fullName} ({deleteStudentTarget.username}
-                  )?
-                </h3>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Tài khoản này sẽ bị xóa khỏi hệ thống và không thể đăng nhập được nữa.
-                </p>
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full max-h-[90dvh] flex flex-col overflow-hidden shadow-xl">
+            <div className="p-5 sm:p-6 overflow-y-auto flex-1 min-h-0">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h3
+                    id="delete-student-modal-title"
+                    className="text-base font-bold text-slate-900"
+                  >
+                    Xóa tài khoản{' '}
+                    {deleteStudentTarget.role === 'teacher'
+                      ? 'Giáo viên'
+                      : 'Học sinh'}{' '}
+                    {deleteStudentTarget.fullName} ({deleteStudentTarget.username}
+                    )?
+                  </h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Tài khoản này sẽ bị xóa khỏi hệ thống và không thể đăng nhập được nữa.
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-2">
+            <div className="sticky bottom-0 px-5 sm:px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setDeleteStudentTarget(null)}
-                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 cursor-pointer"
               >
                 Giữ lại
               </button>
@@ -1915,7 +2151,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                 data-testid="confirm-delete-student-btn"
                 disabled={isProcessingAction}
                 onClick={handleConfirmDeleteStudent}
-                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
               >
                 {isProcessingAction ? 'Đang xóa...' : 'Xóa tài khoản'}
               </button>

@@ -16,6 +16,7 @@ import type {
   ExamSessionStatus,
   SanitizedStudentQuestion,
   SessionAttemptRecord,
+  SessionRealtimeEvent,
   StudentAttemptPaperPayload,
   StudentAttemptResultPayload,
   TeacherAttemptQuestionDetail,
@@ -278,11 +279,70 @@ export class ExamSessionEngine {
   private randomFn: () => number;
   private storageAdapter?: ExamStorageAdapter;
   private idCounter = 1;
+  private sessionListeners = new Map<
+    string,
+    Set<(event: SessionRealtimeEvent) => void>
+  >();
 
   constructor(options: ExamSessionEngineOptions = {}) {
     this.nowFn = options.nowFn ?? (() => new Date());
     this.randomFn = options.randomFn ?? Math.random;
     this.storageAdapter = options.storageAdapter;
+  }
+
+  /**
+   * Đăng ký lắng nghe các sự kiện thời gian thực (giám sát học sinh, phát hiện gian lận tức thời) cho một ca thi.
+   */
+  public subscribeToSessionEvents(
+    sessionId: string,
+    listener: (event: SessionRealtimeEvent) => void
+  ): () => void {
+    let bucket = this.sessionListeners.get(sessionId);
+    if (!bucket) {
+      bucket = new Set();
+      this.sessionListeners.set(sessionId, bucket);
+    }
+    bucket.add(listener);
+    return () => {
+      const current = this.sessionListeners.get(sessionId);
+      if (!current) return;
+      current.delete(listener);
+      if (current.size === 0) {
+        this.sessionListeners.delete(sessionId);
+      }
+    };
+  }
+
+  private emitSessionEvent(
+    event: Omit<SessionRealtimeEvent, 'emittedAt'>
+  ): void {
+    const bucket = this.sessionListeners.get(event.sessionId);
+    if (!bucket || bucket.size === 0) return;
+    const payload: SessionRealtimeEvent = {
+      ...event,
+      emittedAt: this.nowIso(),
+    };
+    for (const listener of bucket) {
+      try {
+        listener(payload);
+      } catch {
+        // Không để lỗi ở 1 subscriber ảnh hưởng các kết nối giám sát khác
+      }
+    }
+  }
+
+  /**
+   * Thông báo các ca thi vừa được đồng bộ dữ liệu mới từ Firestore (hỗ trợ nhiều thực thể máy chủ).
+   */
+  public notifyExternalSync(sessionIds: Iterable<string>): void {
+    const unique = new Set(sessionIds);
+    for (const sessionId of unique) {
+      if (!sessionId) continue;
+      this.emitSessionEvent({
+        type: 'session:synced',
+        sessionId,
+      });
+    }
   }
 
   private nowIso(): string {
@@ -338,6 +398,10 @@ export class ExamSessionEngine {
     for (const q of questionsList) {
       this.questions.set(q.id, q);
     }
+  }
+
+  public getQuestionCount(): number {
+    return this.questions.size;
   }
 
   private getFallbackQuestions(): Question[] {
@@ -586,6 +650,12 @@ export class ExamSessionEngine {
     };
     this.auditLogs.set(log.id, log);
     this.storageAdapter?.onAuditLogSaved?.(log);
+    this.emitSessionEvent({
+      type: 'session:updated',
+      sessionId: params.sessionId,
+      ...(params.targetAttemptId ? { attemptId: params.targetAttemptId } : {}),
+      ...(params.targetStudentId ? { studentId: params.targetStudentId } : {}),
+    });
     return log;
   }
 
@@ -731,6 +801,16 @@ export class ExamSessionEngine {
 
     this.attempts.set(updated.id, updated);
     this.storageAdapter?.onAttemptSaved?.(updated);
+    this.emitSessionEvent({
+      type: 'student:submitted',
+      sessionId: updated.sessionId,
+      attemptId: updated.id,
+      studentId: updated.studentId,
+      studentName: updated.fullName,
+      username: updated.username,
+      className: updated.className,
+      submitReason: updated.submitReason,
+    });
     return updated;
   }
 
@@ -2301,6 +2381,16 @@ export class ExamSessionEngine {
         }
       }
 
+      this.emitSessionEvent({
+        type: 'student:joined',
+        sessionId: session.id,
+        attemptId: updatedAttempt.id,
+        studentId: updatedAttempt.studentId,
+        studentName: updatedAttempt.fullName,
+        username: updatedAttempt.username,
+        className: updatedAttempt.className,
+      });
+
       return this.buildAttemptPaperPayload(updatedAttempt, session, nextSessionToken);
     }
 
@@ -2353,6 +2443,15 @@ export class ExamSessionEngine {
 
     this.attempts.set(newAttempt.id, newAttempt);
     this.storageAdapter?.onAttemptSaved?.(newAttempt);
+    this.emitSessionEvent({
+      type: 'student:joined',
+      sessionId: session.id,
+      attemptId: newAttempt.id,
+      studentId: newAttempt.studentId,
+      studentName: newAttempt.fullName,
+      username: newAttempt.username,
+      className: newAttempt.className,
+    });
 
     return this.buildAttemptPaperPayload(newAttempt, session, sessionToken);
   }
@@ -2508,6 +2607,15 @@ export class ExamSessionEngine {
 
     this.attemptAnswers.set(recordId, record);
     this.storageAdapter?.onAnswerSaved?.(record);
+    this.emitSessionEvent({
+      type: 'student:progress',
+      sessionId: attempt.sessionId,
+      attemptId: attempt.id,
+      studentId: attempt.studentId,
+      studentName: attempt.fullName,
+      username: attempt.username,
+      className: attempt.className,
+    });
     return record;
   }
 
@@ -2596,6 +2704,20 @@ export class ExamSessionEngine {
 
     const countsTowardLimit = doesViolationCountTowardLimit(payload.type);
     if (!countsTowardLimit) {
+      this.emitSessionEvent({
+        type: 'student:violation',
+        sessionId: attempt.sessionId,
+        attemptId: attempt.id,
+        studentId: attempt.studentId,
+        studentName: attempt.fullName,
+        username: attempt.username,
+        className: attempt.className,
+        violation,
+        violationCount: attempt.violationCount,
+        maxViolations: session.maxViolations,
+        countsTowardLimit: false,
+        autoSubmitted: false,
+      });
       return {
         violation,
         attempt,
@@ -2621,12 +2743,87 @@ export class ExamSessionEngine {
       autoSubmitted = true;
     }
 
+    this.emitSessionEvent({
+      type: 'student:violation',
+      sessionId: updatedAttempt.sessionId,
+      attemptId: updatedAttempt.id,
+      studentId: updatedAttempt.studentId,
+      studentName: updatedAttempt.fullName,
+      username: updatedAttempt.username,
+      className: updatedAttempt.className,
+      violation,
+      violationCount: updatedAttempt.violationCount,
+      maxViolations: session.maxViolations,
+      countsTowardLimit: true,
+      autoSubmitted,
+    });
+
     return {
       violation,
       attempt: updatedAttempt,
       autoSubmitted,
       countsTowardLimit: true,
     };
+  }
+
+  /**
+   * Cập nhật chính xác tổng số giây học sinh đã rời màn hình sau khi học sinh quay trở lại bài thi.
+   * Thao tác bất biến (idempotent), không làm tăng thêm số lần vi phạm.
+   */
+  public updateViolationAwayDuration(
+    studentInput: string | UserAccount,
+    attemptId: string,
+    violationId: string,
+    awaySeconds: number,
+    sessionToken?: string
+  ): ViolationEventRecord {
+    const { attempt, session } = this.requireStudentAttemptOwnership(
+      studentInput,
+      attemptId,
+      sessionToken
+    );
+
+    const existing = this.violations.get(violationId);
+    if (!existing || existing.attemptId !== attempt.id) {
+      throw new ExamEngineError(
+        'Không tìm thấy bản ghi vi phạm cần cập nhật thời lượng.',
+        404,
+        'VIOLATION_NOT_FOUND'
+      );
+    }
+
+    const safeAway = Math.max(
+      existing.awaySeconds,
+      Math.min(7200, Math.max(1, Math.floor(Number(awaySeconds) || 0)))
+    );
+
+    if (safeAway === existing.awaySeconds) {
+      return existing;
+    }
+
+    const updated: ViolationEventRecord = {
+      ...existing,
+      awaySeconds: safeAway,
+    };
+    this.violations.set(updated.id, updated);
+    this.storageAdapter?.onViolationSaved?.(updated);
+
+    this.emitSessionEvent({
+      type: 'student:violation_updated',
+      sessionId: attempt.sessionId,
+      attemptId: attempt.id,
+      studentId: attempt.studentId,
+      studentName: attempt.fullName,
+      username: attempt.username,
+      className: attempt.className,
+      violation: updated,
+      violationCount: attempt.violationCount,
+      maxViolations: session.maxViolations,
+      countsTowardLimit: doesViolationCountTowardLimit(updated.type),
+      autoSubmitted: false,
+    });
+
+    return updated;
   }
 
   /**

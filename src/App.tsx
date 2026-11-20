@@ -1,9 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { LoginScreen } from './components/LoginScreen';
-import { StudentPortal } from './components/StudentPortal';
-import { TeacherPortal } from './components/TeacherPortal';
 import { ThemeProvider } from './context/ThemeContext';
-import { SEED_ATTEMPTS, SEED_QUESTIONS, SEED_USERS } from './data/seedData';
+
+const StudentPortal = lazy(() =>
+  import('./components/StudentPortal').then((m) => ({ default: m.StudentPortal }))
+);
+const TeacherPortal = lazy(() =>
+  import('./components/TeacherPortal').then((m) => ({ default: m.TeacherPortal }))
+);
 import {
   authenticateWithUsernamePassword,
   deleteQuestionFromFirestore,
@@ -33,68 +37,63 @@ import {
   updateUserActivityAndStudyTime,
 } from './services/firebase';
 import { ExamAttempt, Question, UserAccount } from './types/exam';
-import { isAdminAccount, resolveDepartmentLogoUrl } from './utils/branding';
-import { ensureCompactLogoDataUrl } from './utils/questionBankUtils';
+import {
+  DEFAULT_DEPARTMENT_LOGO_URL,
+  isAdminAccount,
+  resolveDepartmentLogoUrl,
+} from './utils/branding';
+import {
+  compressLogoFileToBase64,
+  ensureCompactLogoDataUrl,
+} from './utils/questionBankUtils';
 import { computeUpdatedWrongQuestions } from './utils/scoring';
 import { examSessionApi } from './services/examSessionApi';
 
 const SESSION_STORAGE_KEY = 'certiport_genai_active_user_id_v3';
-const USERS_CACHE_KEY = 'certiport_genai_users_cache_v3';
-const QUESTIONS_CACHE_KEY = 'certiport_genai_questions_cache_v3';
-const ATTEMPTS_CACHE_KEY = 'certiport_genai_attempts_cache_v3';
 const DEPARTMENT_LOGO_CACHE_KEY = 'igc_toantin_logo_url_v2';
 
-// Dọn sạch bộ nhớ đệm cũ có chứa dữ liệu ảo (v1/v2) và cache logo cũ chưa chuẩn hóa
+// Dọn sạch các khóa bộ nhớ cục bộ cũ từng lưu danh sách tài khoản/mật khẩu hoặc ngân hàng câu hỏi/đáp án
 try {
   localStorage.removeItem('certiport_genai_active_user_id');
   localStorage.removeItem('certiport_genai_users_cache_v1');
   localStorage.removeItem('certiport_genai_questions_cache_v1');
   localStorage.removeItem('certiport_genai_attempts_cache_v1');
+  localStorage.removeItem('certiport_genai_users_cache_v3');
+  localStorage.removeItem('certiport_genai_questions_cache_v3');
+  localStorage.removeItem('certiport_genai_attempts_cache_v3');
   localStorage.removeItem('igc_toantin_logo_url_v1');
 } catch {
   // Bỏ qua
 }
 
-function loadCachedList<T>(key: string, fallback: T[]): T[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 export default function App() {
-  const [users, setUsers] = useState<UserAccount[]>(() =>
-    loadCachedList<UserAccount>(USERS_CACHE_KEY, SEED_USERS).filter(
-      (u) => !isLegacyVirtualUser(u)
-    )
-  );
-  const [questions, setQuestions] = useState<Question[]>(() =>
-    loadCachedList<Question>(QUESTIONS_CACHE_KEY, SEED_QUESTIONS).filter(
-      (q) => !isLegacyVirtualQuestion(q)
-    )
-  );
-  const [attempts, setAttempts] = useState<ExamAttempt[]>(() =>
-    loadCachedList<ExamAttempt>(ATTEMPTS_CACHE_KEY, SEED_ATTEMPTS).filter(
-      (a) => !isLegacyVirtualAttempt(a)
-    )
-  );
+  const [users, setUsers] = useState<UserAccount[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [attempts, setAttempts] = useState<ExamAttempt[]>([]);
+  const [publicQuestionsCount, setPublicQuestionsCount] = useState<number>(0);
+  const [authenticatedUserSnapshot, setAuthenticatedUserSnapshot] =
+    useState<UserAccount | null>(null);
+
   const [activeUserId, setActiveUserId] = useState<string | null>(() => {
-    const params = new URLSearchParams(window.location.search);
-    const customUser = params.get('user')?.trim();
-    if (customUser) {
-      return customUser;
+    // Chỉ cho phép tham số xem trước nhanh trên URL trong môi trường phát triển (DEV)
+    if (import.meta.env.DEV) {
+      const params = new URLSearchParams(window.location.search);
+      const customUser = params.get('user')?.trim();
+      if (customUser) {
+        return customUser;
+      }
+      if (params.get('role') === 'teacher' || params.get('autostart') === '1') {
+        return 'admin';
+      }
+      if (params.get('role') === 'student') {
+        return 'student_preview';
+      }
     }
-    if (params.get('role') === 'teacher' || params.get('autostart') === '1') {
-      return 'admin';
+    try {
+      return localStorage.getItem(SESSION_STORAGE_KEY);
+    } catch {
+      return null;
     }
-    if (params.get('role') === 'student') {
-      return 'student_preview';
-    }
-    return localStorage.getItem(SESSION_STORAGE_KEY);
   });
 
   const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -106,45 +105,74 @@ export default function App() {
       return undefined;
     }
   });
-
-  // Lưu bộ đệm cục bộ mỗi khi state thay đổi để đảm bảo phản hồi tức thì cả khi mạng chậm
-  useEffect(() => {
-    try {
-      localStorage.setItem(USERS_CACHE_KEY, JSON.stringify(users));
-    } catch {
-      // Bỏ qua nếu bộ nhớ đầy
-    }
-  }, [users]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(QUESTIONS_CACHE_KEY, JSON.stringify(questions));
-    } catch {
-      // Bỏ qua
-    }
-  }, [questions]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(ATTEMPTS_CACHE_KEY, JSON.stringify(attempts));
-    } catch {
-      // Bỏ qua
-    }
-  }, [attempts]);
+  const [isOfficialDefaultLogo, setIsOfficialDefaultLogo] = useState<boolean>(true);
 
   const [isLiveExamMode, setIsLiveExamMode] = useState<boolean>(() => {
+    if (!import.meta.env.DEV) return false;
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
     return tabParam === 'live-exam' || tabParam === 'thingay';
   });
 
+  // Tải số lượng câu hỏi công khai cho màn hình đăng nhập (không tải nội dung/đáp án)
+  useEffect(() => {
+    let cancelled = false;
+    examSessionApi.getPublicStats().then((stats) => {
+      if (!cancelled && stats && typeof stats.questionsCount === 'number') {
+        setPublicQuestionsCount(stats.questionsCount);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Xác thực lại mã phiên HMAC-SHA256 khi tải lại trang nếu có phiên đang lưu
+  useEffect(() => {
+    if (!activeUserId) return;
+
+    // Bỏ qua kiểm tra token bắt buộc đối với các tham số xem trước chỉ dùng trong DEV
+    if (import.meta.env.DEV) {
+      const params = new URLSearchParams(window.location.search);
+      if (
+        params.get('user') ||
+        params.get('role') ||
+        params.get('autostart') === '1'
+      ) {
+        return;
+      }
+    }
+
+    let cancelled = false;
+    examSessionApi.verifySession().then((res) => {
+      if (cancelled) return;
+      if (res.status === 'valid') {
+        setAuthenticatedUserSnapshot(res.user);
+      } else if (res.status === 'invalid') {
+        setAuthenticatedUserSnapshot(null);
+        setActiveUserId(null);
+        try {
+          localStorage.removeItem(SESSION_STORAGE_KEY);
+        } catch {
+          // Bỏ qua
+        }
+        setLoginError(res.message);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUserId]);
+
   // Đồng bộ thời gian thực Logo Tổ Toán - Tin từ Firestore (nếu Quản trị viên có cập nhật logo tùy chỉnh).
   // Khi không có bản ghi đè trên Firestore, toàn bộ hệ thống hiển thị logo chính thức mặc định đã đóng gói sẵn.
   useEffect(() => {
-    const unsubLogo = subscribeToDepartmentLogo((remoteLogo) => {
+    const unsubLogo = subscribeToDepartmentLogo((remoteLogo, isOfficialDefault) => {
       const cleanedRemote = typeof remoteLogo === 'string' ? remoteLogo.trim() : '';
       if (cleanedRemote) {
         setDepartmentLogoUrl(cleanedRemote);
+        setIsOfficialDefaultLogo(Boolean(isOfficialDefault));
         try {
           localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, cleanedRemote);
         } catch {
@@ -152,6 +180,7 @@ export default function App() {
         }
       } else {
         setDepartmentLogoUrl(undefined);
+        setIsOfficialDefaultLogo(true);
         try {
           localStorage.removeItem(DEPARTMENT_LOGO_CACHE_KEY);
         } catch {
@@ -165,28 +194,27 @@ export default function App() {
     };
   }, []);
 
-  // Khởi tạo kết nối Firestore cho tài khoản người dùng
+  // Khởi tạo kết nối Firestore cho tài khoản người dùng khi đã đăng nhập
   useEffect(() => {
+    if (!activeUserId) {
+      setUsers([]);
+      return;
+    }
+
     let isMounted = true;
     const unsubUsers = subscribeToUsers((liveUsers) => {
       if (!isMounted) return;
-      const mergedMap = new Map<string, UserAccount>();
-      for (const su of SEED_USERS) mergedMap.set(su.id, su);
-      for (const lu of liveUsers) {
-        if (isLegacyVirtualUser(lu)) continue;
-        const seedMatch = SEED_USERS.find((s) => s.id === lu.id);
-        mergedMap.set(lu.id, {
-          ...seedMatch,
+      const cleanedList = liveUsers
+        .filter((lu) => !isLegacyVirtualUser(lu))
+        .map((lu) => ({
           ...lu,
           bookmarkedQuestions: lu.bookmarkedQuestions ?? [],
           wrongQuestions: lu.wrongQuestions ?? [],
           masteredQuestions: lu.masteredQuestions ?? [],
           practiceProgress: lu.practiceProgress ?? {},
-        });
-      }
-      const mergedList = Array.from(mergedMap.values());
-      setUsers(mergedList);
-      const adminDoc = mergedList.find((u) => u.id === 'admin');
+        }));
+      setUsers(cleanedList);
+      const adminDoc = cleanedList.find((u) => u.id === 'admin');
       if (adminDoc && typeof adminDoc.logoUrl === 'string' && adminDoc.logoUrl.trim()) {
         const cleanedLogo = adminDoc.logoUrl.trim();
         setDepartmentLogoUrl(cleanedLogo);
@@ -213,13 +241,96 @@ export default function App() {
     };
   }, [activeUserId]);
 
-  // Chỉ lắng nghe bộ câu hỏi và lịch sử tự luyện khi học sinh KHÔNG ở chế độ "Thi ngay" (tránh rò rỉ đáp án qua gói tin mạng Firestore khi đang thi)
+  const currentUser = useMemo(() => {
+    if (!activeUserId) return null;
+    const found =
+      users.find((u) => u.id.toLowerCase() === activeUserId.toLowerCase()) ??
+      (authenticatedUserSnapshot &&
+      authenticatedUserSnapshot.id.toLowerCase() === activeUserId.toLowerCase()
+        ? authenticatedUserSnapshot
+        : null);
+    if (found) return found;
+
+    // Chỉ cho phép tạo hồ sơ xem trước từ tham số URL trong môi trường phát triển (DEV)
+    if (import.meta.env.DEV) {
+      const params = new URLSearchParams(window.location.search);
+      const roleParam = params.get('role');
+      const classParam = params.get('class')?.trim();
+
+      if (
+        roleParam === 'teacher' ||
+        activeUserId.toLowerCase().startsWith('gv_')
+      ) {
+        const resolvedClass =
+          classParam ||
+          (activeUserId.toLowerCase() === 'gv_toan'
+            ? '12A1'
+            : activeUserId.toLowerCase() === 'gv_tin'
+              ? '12A2'
+              : '12A1');
+        return {
+          id: activeUserId,
+          username: activeUserId,
+          password: '',
+          fullName: `Giáo viên (${activeUserId})`,
+          role: 'teacher' as const,
+          className: resolvedClass,
+          lastLogin: new Date().toISOString(),
+          status: 'online' as const,
+          activeStatus: 'online' as const,
+          totalStudyMinutes: 0,
+          totalStudySeconds: 0,
+        };
+      }
+
+      if (activeUserId === 'student_preview' || roleParam === 'student') {
+        return {
+          id: activeUserId,
+          username: activeUserId === 'student_preview' ? 'HocSinh' : activeUserId,
+          password: '',
+          fullName:
+            activeUserId === 'student_preview'
+              ? 'Chế độ Xem Giao diện Học sinh'
+              : `Học sinh (${activeUserId})`,
+          role: 'student' as const,
+          className: classParam || 'Phòng thi Certiport GenAI',
+          lastLogin: new Date().toISOString(),
+          status: 'online' as const,
+          activeStatus: 'online' as const,
+          totalStudyMinutes: 0,
+          totalStudySeconds: 0,
+          bookmarkedQuestions: [],
+          wrongQuestions: [],
+          masteredQuestions: [],
+          practiceProgress: {},
+        };
+      }
+    }
+
+    return null;
+  }, [activeUserId, users, authenticatedUserSnapshot]);
+
+  const isTeacherRole = currentUser?.role === 'teacher';
+
+  // Chỉ lắng nghe bộ câu hỏi và lịch sử tự luyện khi đã đăng nhập VÀ học sinh KHÔNG ở chế độ "Thi ngay"
+  // Khi học sinh bước vào tab "Thi ngay", lập tức xóa bộ câu hỏi (chứa correctAnswer) khỏi bộ nhớ React và ngắt lắng nghe Firestore
   useEffect(() => {
-    if (isLiveExamMode && activeUserId !== 'admin') {
+    if (!activeUserId) {
+      setQuestions([]);
+      setAttempts([]);
       return;
     }
+
+    if (isLiveExamMode && !isTeacherRole) {
+      setQuestions([]);
+      return;
+    }
+
     const unsubQuestions = subscribeToQuestions((liveQuestions) => {
       setQuestions(liveQuestions);
+      if (liveQuestions.length > 0) {
+        setPublicQuestionsCount(liveQuestions.length);
+      }
     });
     const unsubAttempts = subscribeToAttempts((liveAttempts) => {
       setAttempts(liveAttempts);
@@ -228,96 +339,49 @@ export default function App() {
       unsubQuestions();
       unsubAttempts();
     };
-  }, [isLiveExamMode, activeUserId]);
-
-  const currentUser = useMemo(() => {
-    if (!activeUserId) return null;
-    const found =
-      users.find((u) => u.id.toLowerCase() === activeUserId.toLowerCase()) ??
-      SEED_USERS.find((u) => u.id.toLowerCase() === activeUserId.toLowerCase()) ??
-      null;
-    if (found) return found;
-
-    // Hỗ trợ chế độ xem giao diện học sinh/giáo viên qua tham số URL ổn định xuyên suốt phiên
-    const params = new URLSearchParams(window.location.search);
-    const roleParam = params.get('role');
-    const classParam = params.get('class')?.trim();
-
-    if (
-      roleParam === 'teacher' ||
-      activeUserId.toLowerCase().startsWith('gv_')
-    ) {
-      const resolvedClass =
-        classParam ||
-        (activeUserId.toLowerCase() === 'gv_toan'
-          ? '12A1'
-          : activeUserId.toLowerCase() === 'gv_tin'
-            ? '12A2'
-            : '12A1');
-      return {
-        id: activeUserId,
-        username: activeUserId,
-        password: '',
-        fullName: `Giáo viên (${activeUserId})`,
-        role: 'teacher' as const,
-        className: resolvedClass,
-        lastLogin: new Date().toISOString(),
-        status: 'online' as const,
-        activeStatus: 'online' as const,
-        totalStudyMinutes: 0,
-        totalStudySeconds: 0,
-      };
-    }
-
-    if (activeUserId === 'student_preview' || roleParam === 'student') {
-      return {
-        id: activeUserId,
-        username: activeUserId === 'student_preview' ? 'HocSinh' : activeUserId,
-        password: '',
-        fullName:
-          activeUserId === 'student_preview'
-            ? 'Chế độ Xem Giao diện Học sinh'
-            : `Học sinh (${activeUserId})`,
-        role: 'student' as const,
-        className: classParam || 'Phòng thi Certiport GenAI',
-        lastLogin: new Date().toISOString(),
-        status: 'online' as const,
-        activeStatus: 'online' as const,
-        totalStudyMinutes: 0,
-        totalStudySeconds: 0,
-        bookmarkedQuestions: [],
-        wrongQuestions: [],
-        masteredQuestions: [],
-        practiceProgress: {},
-      };
-    }
-
-    return null;
-  }, [activeUserId, users]);
+  }, [isLiveExamMode, activeUserId, isTeacherRole]);
 
   useEffect(() => {
     examSessionApi.syncContext({
       currentUser,
-      users,
-      questions,
+      users: isTeacherRole ? users : undefined,
+      questions: isTeacherRole ? questions : isLiveExamMode ? [] : undefined,
     });
-  }, [currentUser, users, questions]);
+  }, [currentUser, users, questions, isTeacherRole, isLiveExamMode]);
 
   const handleLogin = useCallback(
     async (username: string, password: string) => {
       setLoginError(null);
       setIsAuthenticating(true);
       try {
-        const authenticated = await authenticateWithUsernamePassword(
-          username,
-          password,
-          users
-        );
-        setUsers((prev) =>
-          prev.map((u) => (u.id === authenticated.id ? authenticated : u))
-        );
+        // Ưu tiên xác thực qua máy chủ Express để nhận mã phiên HMAC-SHA256 hợp lệ
+        const serverAuth = await examSessionApi.login(username, password);
+        let authenticated: UserAccount;
+
+        if (serverAuth) {
+          authenticated = serverAuth.user;
+          void updateUserActivityAndStudyTime(
+            authenticated.id,
+            authenticated.role === 'student' ? 'studying' : 'online',
+            0
+          );
+        } else {
+          // Dự phòng khi chạy trên môi trường tĩnh không có backend Express
+          authenticated = await authenticateWithUsernamePassword(
+            username,
+            password,
+            users
+          );
+        }
+
+        setAuthenticatedUserSnapshot(authenticated);
         setActiveUserId(authenticated.id);
-        localStorage.setItem(SESSION_STORAGE_KEY, authenticated.id);
+        setIsLiveExamMode(false);
+        try {
+          localStorage.setItem(SESSION_STORAGE_KEY, authenticated.id);
+        } catch {
+          // Bỏ qua
+        }
       } catch (err) {
         setLoginError(
           err instanceof Error
@@ -333,8 +397,18 @@ export default function App() {
 
   const handleLogout = useCallback(async () => {
     const uid = activeUserId;
+    examSessionApi.clearAuthToken();
+    setAuthenticatedUserSnapshot(null);
     setActiveUserId(null);
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    setIsLiveExamMode(false);
+    setQuestions([]);
+    setUsers([]);
+    setAttempts([]);
+    try {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+      // Bỏ qua
+    }
     if (uid) {
       await updateUserActivityAndStudyTime(uid, 'offline', 0);
     }
@@ -386,8 +460,25 @@ export default function App() {
         throw new Error('Chỉ tài khoản quản trị (admin) mới có quyền chỉnh sửa logo.');
       }
       const cleaned = logoUrl.trim();
-      const compact = cleaned ? await ensureCompactLogoDataUrl(cleaned) : '';
+      const resettingToOfficialDefault = !cleaned;
+      let compact = cleaned ? await ensureCompactLogoDataUrl(cleaned) : '';
+
+      // Khi khôi phục logo mặc định, đồng bộ lại bản nén của logo chính thức lên Firestore
+      // để mọi máy tính/trình duyệt (kể cả bản đã xuất bản trước đó) luôn hiển thị đúng logo tổ.
+      if (resettingToOfficialDefault) {
+        try {
+          const resp = await fetch(DEFAULT_DEPARTMENT_LOGO_URL);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            compact = await compressLogoFileToBase64(blob);
+          }
+        } catch {
+          compact = '';
+        }
+      }
+
       setDepartmentLogoUrl(compact || undefined);
+      setIsOfficialDefaultLogo(resettingToOfficialDefault);
       try {
         if (compact) {
           localStorage.setItem(DEPARTMENT_LOGO_CACHE_KEY, compact);
@@ -400,7 +491,9 @@ export default function App() {
       setUsers((prev) =>
         prev.map((u) => (u.id === 'admin' ? { ...u, logoUrl: compact } : u))
       );
-      await updateDepartmentLogoInFirestore(compact);
+      await updateDepartmentLogoInFirestore(compact, {
+        isOfficialDefault: resettingToOfficialDefault,
+      });
     },
     [currentUser]
   );
@@ -651,6 +744,21 @@ export default function App() {
     await resetSeedDataToDefault();
   }, []);
 
+  const portalLoadingFallback = (
+    <div
+      data-testid="portal-lazy-loading"
+      className="min-h-screen bg-[var(--color-bg-canvas)] flex flex-col items-center justify-center gap-3 p-6 text-center"
+    >
+      <div
+        className="w-9 h-9 rounded-full border-3 border-teal-200 border-t-teal-700 animate-spin"
+        aria-hidden="true"
+      />
+      <p className="text-sm font-semibold text-[var(--color-text-secondary)]">
+        Đang tải giao diện...
+      </p>
+    </div>
+  );
+
   return (
     <ThemeProvider>
       {!currentUser ? (
@@ -659,45 +767,49 @@ export default function App() {
           isLoading={isAuthenticating}
           errorMessage={loginError}
           seededUsers={users}
-          questionsCount={questions.length}
+          questionsCount={questions.length || publicQuestionsCount}
           departmentLogoUrl={effectiveDepartmentLogoUrl}
         />
       ) : currentUser.role === 'teacher' ? (
-        <TeacherPortal
-          currentUser={currentUser}
-          users={users}
-          questions={questions}
-          attempts={attempts}
-          departmentLogoUrl={effectiveDepartmentLogoUrl}
-          hasCustomDepartmentLogo={Boolean(departmentLogoUrl)}
-          onUpdateDepartmentLogo={
-            canManageDepartmentLogo ? handleUpdateDepartmentLogo : undefined
-          }
-          onLogout={handleLogout}
-          onSaveStudent={handleSaveStudent}
-          onBatchSaveStudents={handleBatchSaveStudents}
-          onUpdateStudentPassword={handleUpdateStudentPassword}
-          onResetStudentProgress={handleResetStudentProgress}
-          onDeleteStudent={handleDeleteStudent}
-          onSaveQuestion={handleSaveQuestion}
-          onDeleteQuestion={handleDeleteQuestion}
-          onBatchSaveQuestions={handleBatchSaveQuestions}
-          onResetSeedData={handleResetSeedData}
-        />
+        <Suspense fallback={portalLoadingFallback}>
+          <TeacherPortal
+            currentUser={currentUser}
+            users={users}
+            questions={questions}
+            attempts={attempts}
+            departmentLogoUrl={effectiveDepartmentLogoUrl}
+            hasCustomDepartmentLogo={Boolean(departmentLogoUrl && !isOfficialDefaultLogo)}
+            onUpdateDepartmentLogo={
+              canManageDepartmentLogo ? handleUpdateDepartmentLogo : undefined
+            }
+            onLogout={handleLogout}
+            onSaveStudent={handleSaveStudent}
+            onBatchSaveStudents={handleBatchSaveStudents}
+            onUpdateStudentPassword={handleUpdateStudentPassword}
+            onResetStudentProgress={handleResetStudentProgress}
+            onDeleteStudent={handleDeleteStudent}
+            onSaveQuestion={handleSaveQuestion}
+            onDeleteQuestion={handleDeleteQuestion}
+            onBatchSaveQuestions={handleBatchSaveQuestions}
+            onResetSeedData={handleResetSeedData}
+          />
+        </Suspense>
       ) : (
-        <StudentPortal
-          currentUser={currentUser}
-          questions={questions}
-          attempts={attempts}
-          departmentLogoUrl={effectiveDepartmentLogoUrl}
-          onLogout={handleLogout}
-          onSaveAttempt={handleSaveAttempt}
-          onSyncStudyTime={handleSyncStudyTime}
-          onToggleBookmark={handleToggleBookmark}
-          onRecordPracticeCheck={handleRecordPracticeCheck}
-          onMarkQuestionMastered={handleMarkQuestionMastered}
-          onActiveTabChange={(tab) => setIsLiveExamMode(tab === 'live-exam')}
-        />
+        <Suspense fallback={portalLoadingFallback}>
+          <StudentPortal
+            currentUser={currentUser}
+            questions={questions}
+            attempts={attempts}
+            departmentLogoUrl={effectiveDepartmentLogoUrl}
+            onLogout={handleLogout}
+            onSaveAttempt={handleSaveAttempt}
+            onSyncStudyTime={handleSyncStudyTime}
+            onToggleBookmark={handleToggleBookmark}
+            onRecordPracticeCheck={handleRecordPracticeCheck}
+            onMarkQuestionMastered={handleMarkQuestionMastered}
+            onActiveTabChange={(tab) => setIsLiveExamMode(tab === 'live-exam')}
+          />
+        </Suspense>
       )}
     </ThemeProvider>
   );

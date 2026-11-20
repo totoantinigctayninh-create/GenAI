@@ -549,10 +549,10 @@ test('Phân quyền cô lập: Học sinh A KHÔNG đọc/sửa/nộp được l
       err.errorCode === 'FORBIDDEN_SESSION_ACCESS'
   );
 
-  // 6. Kiểm tra qua HTTP Express Router thực tế
+  // 6. Kiểm tra qua HTTP Express Router thực tế với mã phiên HMAC-SHA256
   const app = express();
   app.use(express.json());
-  app.use('/api', createExamSessionRouter(engine));
+  app.use('/api', createExamSessionRouter(engine, { authSecret: 'unit_test_secret_key_2026_abcd' }));
 
   const server = app.listen(0);
   try {
@@ -560,11 +560,27 @@ test('Phân quyền cô lập: Học sinh A KHÔNG đọc/sửa/nộp được l
     const port = typeof addr === 'object' && addr ? addr.port : 0;
     const baseUrl = `http://127.0.0.1:${port}/api`;
 
+    const loginAs = async (username: string, password: string) => {
+      const res = await fetch(`${baseUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      assert.equal(res.status, 200);
+      const data = (await res.json()) as { ok: boolean; token: string };
+      assert.equal(data.ok, true);
+      assert.equal(typeof data.token, 'string');
+      return data.token;
+    };
+
+    const hsAToken = await loginAs('hs_a', '123');
+    const gvToanToken = await loginAs('gv_toan', '123');
+
     // Học sinh A gọi GET /api/attempts/:attemptId/result của Học sinh B -> HTTP 403
     const forbiddenRes = await fetch(
       `${baseUrl}/attempts/${paperB.attempt.id}/result`,
       {
-        headers: { 'x-user-id': 'hs_a' },
+        headers: { Authorization: `Bearer ${hsAToken}` },
       }
     );
     assert.equal(forbiddenRes.status, 403);
@@ -578,7 +594,7 @@ test('Phân quyền cô lập: Học sinh A KHÔNG đọc/sửa/nộp được l
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-id': 'gv_toan',
+          Authorization: `Bearer ${gvToanToken}`,
         },
         body: JSON.stringify({ title: 'Bản sao Ca thi 12A1' }),
       }
@@ -586,7 +602,7 @@ test('Phân quyền cô lập: Học sinh A KHÔNG đọc/sửa/nộp được l
     assert.equal(cloneRes.status, 201);
 
     const detailRes = await fetch(`${baseUrl}/exam-sessions/${session.id}`, {
-      headers: { 'x-user-id': 'gv_toan' },
+      headers: { Authorization: `Bearer ${gvToanToken}` },
     });
     assert.equal(detailRes.status, 200);
     const detailJson = (await detailRes.json()) as {
@@ -964,11 +980,27 @@ test('Bước 6/8: Theo dõi trực tiếp (32 đang thi, 5 đã nộp, 3 chưa 
   assert.equal(simDetail.attempts[0].violationCount >= simDetail.attempts[1].violationCount, true);
 });
 
-test('Giáo viên tùy chỉnh (ví dụ khanglp) đồng bộ qua header hoặc sync-context tạo và tải danh sách ca thi thành công', async () => {
+test('Bảo mật API: Chặn giả mạo header x-user-role: teacher, chặn học sinh gọi sync-context và chỉ cấp quyền khi có token HMAC-SHA256 hợp lệ', async () => {
   const { engine } = createTestSetup();
+  // Thêm tài khoản giáo viên tùy chỉnh khanglp vào engine giống như đồng bộ từ Firestore
+  engine.upsertUser({
+    id: 'khanglp',
+    username: 'khanglp',
+    password: 'secret_khang_password',
+    fullName: 'Lê Phúc Khang',
+    role: 'teacher',
+    className: '',
+    lastLogin: '2026-11-06T08:00:00.000Z',
+    status: 'online',
+    totalStudyMinutes: 0,
+  });
+
   const app = express();
   app.use(express.json());
-  app.use('/api', createExamSessionRouter(engine));
+  app.use(
+    '/api',
+    createExamSessionRouter(engine, { authSecret: 'security_test_secret_2026_xyz' })
+  );
 
   const server = app.listen(0);
   try {
@@ -976,29 +1008,85 @@ test('Giáo viên tùy chỉnh (ví dụ khanglp) đồng bộ qua header hoặc
     const port = typeof addr === 'object' && addr ? addr.port : 0;
     const baseUrl = `http://127.0.0.1:${port}/api`;
 
-    // 1. Gọi GET /api/exam-sessions bằng tài khoản giáo viên mới 'khanglp' kèm header x-user-role: teacher
-    const listRes = await fetch(`${baseUrl}/exam-sessions`, {
+    // 1. Giả mạo header x-user-id + x-user-role: teacher không có token -> phải bị từ chối 401 và KHÔNG tạo tài khoản giả
+    const spoofRes = await fetch(`${baseUrl}/exam-sessions`, {
       headers: {
-        'x-user-id': 'khanglp',
+        'x-user-id': 'fake_hacker_teacher',
         'x-user-role': 'teacher',
-        'x-user-fullname': encodeURIComponent('Lê Phúc Khang'),
+        'x-user-fullname': encodeURIComponent('Giả mạo'),
       },
     });
-    assert.equal(listRes.status, 200);
-    const listJson = (await listRes.json()) as {
-      ok: boolean;
-      sessions: Array<{ id: string }>;
-    };
-    assert.equal(listJson.ok, true);
+    assert.equal(spoofRes.status, 401);
+    assert.equal(engine.getUser('fake_hacker_teacher'), undefined);
 
-    // 2. Tạo ca thi mới bởi 'khanglp'
+    // 2. Chặn gọi POST /api/exam-sessions/sync-context không xác thực hoặc bằng tài khoản học sinh
+    const unauthSyncRes = await fetch(`${baseUrl}/exam-sessions/sync-context`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questions: [], users: [] }),
+    });
+    assert.equal(unauthSyncRes.status, 401);
+
+    const studentLoginRes = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'hs_a', password: '123' }),
+    });
+    assert.equal(studentLoginRes.status, 200);
+    const studentAuth = (await studentLoginRes.json()) as {
+      ok: boolean;
+      token: string;
+      user: { password: string };
+    };
+    assert.equal(studentAuth.user.password, '');
+
+    const studentSyncRes = await fetch(`${baseUrl}/exam-sessions/sync-context`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${studentAuth.token}`,
+      },
+      body: JSON.stringify({
+        users: [{ id: 'hs_a', username: 'hs_a', role: 'teacher', password: '123' }],
+      }),
+    });
+    assert.equal(studentSyncRes.status, 403);
+    assert.equal(engine.getUser('hs_a')?.role, 'student');
+
+    // Học sinh dùng token của mình gọi API giáo viên -> 403
+    const studentListRes = await fetch(`${baseUrl}/exam-sessions`, {
+      headers: { Authorization: `Bearer ${studentAuth.token}` },
+    });
+    assert.equal(studentListRes.status, 403);
+
+    // 3. Giáo viên khanglp đăng nhập đúng mật khẩu -> nhận token HMAC-SHA256 và tạo ca thi thành công
+    const teacherLoginRes = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'khanglp',
+        password: 'secret_khang_password',
+      }),
+    });
+    assert.equal(teacherLoginRes.status, 200);
+    const teacherAuth = (await teacherLoginRes.json()) as {
+      ok: boolean;
+      token: string;
+      user: { id: string; password: string };
+    };
+    assert.equal(teacherAuth.user.id, 'khanglp');
+    assert.equal(teacherAuth.user.password, '');
+
+    const listRes = await fetch(`${baseUrl}/exam-sessions`, {
+      headers: { Authorization: `Bearer ${teacherAuth.token}` },
+    });
+    assert.equal(listRes.status, 200);
+
     const createRes = await fetch(`${baseUrl}/exam-sessions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-user-id': 'khanglp',
-        'x-user-role': 'teacher',
-        'x-user-fullname': encodeURIComponent('Lê Phúc Khang'),
+        Authorization: `Bearer ${teacherAuth.token}`,
       },
       body: JSON.stringify({
         title: 'Kiểm tra GenAI Khối 12',
@@ -1020,4 +1108,202 @@ test('Giáo viên tùy chỉnh (ví dụ khanglp) đồng bộ qua header hoặc
     server.close();
   }
 });
+
+test('Giám sát thời gian thực (SSE): Học sinh vi phạm được đẩy ngay tới giáo viên kèm thời gian chính xác và cập nhật thời lượng rời màn hình', async () => {
+  const { engine, advanceSeconds } = createTestSetup('2026-11-19T08:15:30.000Z');
+
+  const session = engine.createSession('gv_toan', {
+    title: 'Ca thi Giám sát Thời gian thực',
+    code: 'R2T3S4',
+    targetClass: '12A1',
+    questionCount: 4,
+    durationMinutes: 30,
+    maxViolations: 3,
+    status: 'open',
+  });
+
+  const started = engine.startOrResumeAttempt('hs_a', session.code, 'dev_rt');
+
+  // 1. Kiểm tra pub/sub cấp engine
+  const receivedTypes: string[] = [];
+  const unsubscribe = engine.subscribeToSessionEvents(session.id, (evt) => {
+    receivedTypes.push(evt.type);
+  });
+
+  // 2. Mở kết nối SSE thực tế qua Express router bằng mã phiên HMAC-SHA256
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/api',
+    createExamSessionRouter(engine, { authSecret: 'sse_test_secret_key_2026_1234' })
+  );
+  const server = app.listen(0);
+
+  const sseAbort = new AbortController();
+  try {
+    const addr = server.address();
+    const port = typeof addr === 'object' && addr ? addr.port : 0;
+    const baseUrl = `http://127.0.0.1:${port}/api`;
+
+    const teacherLogin = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'gv_toan', password: '123' }),
+    });
+    const { token: gvToanToken } = (await teacherLogin.json()) as { token: string };
+
+    const studentLogin = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'hs_a', password: '123' }),
+    });
+    const { token: hsAToken } = (await studentLogin.json()) as { token: string };
+
+    const streamRes = await fetch(
+      `${baseUrl}/exam-sessions/${session.id}/stream?authToken=${encodeURIComponent(gvToanToken)}`,
+      { signal: sseAbort.signal }
+    );
+    assert.equal(streamRes.status, 200);
+    assert.equal(
+      streamRes.headers.get('content-type')?.includes('text/event-stream'),
+      true
+    );
+
+    const reader = streamRes.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const parsedEvents: Array<{ event: string; data: Record<string, unknown> }> = [];
+
+    const readUntilCount = async (targetCount: number, timeoutMs = 3000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (parsedEvents.length < targetCount) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          throw new Error(
+            `Timeout chờ sự kiện SSE (${parsedEvents.length}/${targetCount})`
+          );
+        }
+        const chunk = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('SSE read timeout')), remaining)
+          ),
+        ]);
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() || '';
+        for (const block of blocks) {
+          const lines = block.split('\n');
+          let eventName = 'message';
+          let dataLine = '';
+          for (const line of lines) {
+            if (line.startsWith('event:')) eventName = line.slice(6).trim();
+            if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+          }
+          if (dataLine) {
+            parsedEvents.push({
+              event: eventName,
+              data: JSON.parse(dataLine) as Record<string, unknown>,
+            });
+          }
+        }
+      }
+    };
+
+    // Chờ gói snapshot đầu tiên khi vừa kết nối
+    await readUntilCount(1);
+    assert.equal(parsedEvents[0].event, 'snapshot');
+
+    // Học sinh phát sinh hành vi gian lận (chuyển tab) tại đúng 08:16:05Z
+    advanceSeconds(35);
+    const violRes = await fetch(
+      `${baseUrl}/attempts/${started.attempt.id}/violations`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${hsAToken}`,
+        },
+        body: JSON.stringify({
+          type: 'tab_switch',
+          awaySeconds: 0,
+          currentQuestionOrder: 2,
+          note: 'Chuyển sang tab trình duyệt khác',
+          sessionToken: started.sessionToken,
+        }),
+      }
+    );
+    assert.equal(violRes.status, 200);
+    const violJson = (await violRes.json()) as {
+      ok: boolean;
+      violation: { id: string; occurredAt: string; awaySeconds: number };
+      violationCount: number;
+    };
+    assert.equal(violJson.ok, true);
+    assert.equal(violJson.violation.occurredAt, '2026-11-19T08:16:05.000Z');
+    assert.equal(violJson.violationCount, 1);
+
+    // Giáo viên nhận ngay sự kiện đẩy thời gian thực `student:violation`
+    await readUntilCount(2);
+    assert.equal(parsedEvents[1].event, 'update');
+    const violationPushEvent = parsedEvents[1].data.event as {
+      type: string;
+      violation?: { id: string; occurredAt: string; type: string };
+    };
+    assert.equal(violationPushEvent.type, 'student:violation');
+    assert.equal(violationPushEvent.violation?.id, violJson.violation.id);
+    assert.equal(
+      violationPushEvent.violation?.occurredAt,
+      '2026-11-19T08:16:05.000Z'
+    );
+
+    // Học sinh quay lại phòng thi sau 9 giây -> PATCH cập nhật thời lượng rời màn hình (không tăng violationCount)
+    advanceSeconds(9);
+    const patchRes = await fetch(
+      `${baseUrl}/attempts/${started.attempt.id}/violations/${violJson.violation.id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${hsAToken}`,
+        },
+        body: JSON.stringify({
+          awaySeconds: 9,
+          sessionToken: started.sessionToken,
+        }),
+      }
+    );
+    assert.equal(patchRes.status, 200);
+    const patchJson = (await patchRes.json()) as {
+      ok: boolean;
+      violation: { id: string; awaySeconds: number };
+    };
+    assert.equal(patchJson.ok, true);
+    assert.equal(patchJson.violation.awaySeconds, 9);
+
+    // Giáo viên nhận sự kiện `student:violation_updated` và tổng số vi phạm vẫn là 1
+    await readUntilCount(3);
+    assert.equal(parsedEvents[2].event, 'update');
+    const updatedPushEvent = parsedEvents[2].data.event as {
+      type: string;
+      violation?: { id: string; awaySeconds: number };
+    };
+    assert.equal(updatedPushEvent.type, 'student:violation_updated');
+    assert.equal(updatedPushEvent.violation?.awaySeconds, 9);
+
+    const detailAfter = engine.getTeacherSessionDetail('gv_toan', session.id);
+    assert.equal(detailAfter.attempts[0].violationCount, 1);
+    assert.equal(detailAfter.violations[0].awaySeconds, 9);
+    assert.deepEqual(receivedTypes, [
+      'student:violation',
+      'student:violation_updated',
+    ]);
+  } finally {
+    unsubscribe();
+    sseAbort.abort();
+    server.close();
+  }
+});
+
 

@@ -344,8 +344,8 @@ export const TeacherSessionResultsOverview: React.FC<
     }
   };
 
-  const handleExportExcel = () => {
-    const bytes = buildSessionResultsExcelBytes({
+  const handleExportExcel = async () => {
+    const bytes = await buildSessionResultsExcelBytes({
       session,
       rawRows,
       questionAnalysis,
@@ -997,44 +997,46 @@ export const TeacherSessionResultsOverview: React.FC<
                   : 'sr-only'
               }
             >
-              <table
-                tabIndex={0}
-                data-testid="passfail-fallback-table"
-                aria-label="Bảng số liệu Đạt và Không đạt"
-                className="w-full text-left border-collapse text-xs"
-              >
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 font-bold text-slate-700">
-                    <th className="py-1 px-2">Phân loại</th>
-                    <th className="py-1 px-2 text-right">Số học sinh</th>
-                    <th className="py-1 px-2 text-right">Phần trăm</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  <tr>
-                    <td className="py-1 px-2 font-medium">
-                      Đạt (≥{session.passScore})
-                    </td>
-                    <td className="py-1 px-2 text-right tabular-nums font-semibold">
-                      {analytics.passFailBar.passCount}
-                    </td>
-                    <td className="py-1 px-2 text-right tabular-nums">
-                      {analytics.passFailBar.passRatePercent}%
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="py-1 px-2 font-medium">
-                      Không đạt (&lt;{session.passScore})
-                    </td>
-                    <td className="py-1 px-2 text-right tabular-nums font-semibold">
-                      {analytics.passFailBar.failCount}
-                    </td>
-                    <td className="py-1 px-2 text-right tabular-nums">
-                      {analytics.passFailBar.failRatePercent}%
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+              <div className="w-full overflow-x-auto -mx-1 px-1">
+                <table
+                  tabIndex={0}
+                  data-testid="passfail-fallback-table"
+                  aria-label="Bảng số liệu Đạt và Không đạt"
+                  className="w-full text-left border-collapse text-xs"
+                >
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 font-bold text-slate-700">
+                      <th className="py-1 px-2">Phân loại</th>
+                      <th className="py-1 px-2 text-right">Số học sinh</th>
+                      <th className="py-1 px-2 text-right">Phần trăm</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    <tr>
+                      <td className="py-1 px-2 font-medium">
+                        Đạt (≥{session.passScore})
+                      </td>
+                      <td className="py-1 px-2 text-right tabular-nums font-semibold">
+                        {analytics.passFailBar.passCount}
+                      </td>
+                      <td className="py-1 px-2 text-right tabular-nums">
+                        {analytics.passFailBar.passRatePercent}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-1 px-2 font-medium">
+                        Không đạt (&lt;{session.passScore})
+                      </td>
+                      <td className="py-1 px-2 text-right tabular-nums font-semibold">
+                        {analytics.passFailBar.failCount}
+                      </td>
+                      <td className="py-1 px-2 text-right tabular-nums">
+                        {analytics.passFailBar.failRatePercent}%
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
 
@@ -1134,39 +1136,41 @@ export const TeacherSessionResultsOverview: React.FC<
                   : 'sr-only'
               }
             >
-              <table
-                tabIndex={0}
-                data-testid="topics-fallback-table"
-                aria-label="Bảng số liệu tỉ lệ đúng theo 4 chuyên đề"
-                className="w-full text-left border-collapse text-xs"
-              >
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 font-bold text-slate-700">
-                    <th className="py-1 px-2">Chuyên đề</th>
-                    <th className="py-1 px-2 text-right">Câu đúng / Tổng</th>
-                    <th className="py-1 px-2 text-right">Tỉ lệ đúng</th>
-                    <th className="py-1 px-2">Đánh giá</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {analytics.topics.bars.map((b) => (
-                    <tr key={b.topic}>
-                      <td className="py-1 px-2 font-medium text-slate-800">
-                        {b.shortLabel}
-                      </td>
-                      <td className="py-1 px-2 text-right tabular-nums">
-                        {b.correctCount}/{b.totalCount}
-                      </td>
-                      <td className="py-1 px-2 text-right tabular-nums font-bold">
-                        {b.accuracyPercent}%
-                      </td>
-                      <td className="py-1 px-2">
-                        {b.isWeakest ? 'Yếu nhất' : 'Bình thường'}
-                      </td>
+              <div className="w-full overflow-x-auto -mx-1 px-1">
+                <table
+                  tabIndex={0}
+                  data-testid="topics-fallback-table"
+                  aria-label="Bảng số liệu tỉ lệ đúng theo 4 chuyên đề"
+                  className="w-full text-left border-collapse text-xs"
+                >
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 font-bold text-slate-700">
+                      <th className="py-1 px-2">Chuyên đề</th>
+                      <th className="py-1 px-2 text-right">Câu đúng / Tổng</th>
+                      <th className="py-1 px-2 text-right">Tỉ lệ đúng</th>
+                      <th className="py-1 px-2">Đánh giá</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {analytics.topics.bars.map((b) => (
+                      <tr key={b.topic}>
+                        <td className="py-1 px-2 font-medium text-slate-800">
+                          {b.shortLabel}
+                        </td>
+                        <td className="py-1 px-2 text-right tabular-nums">
+                          {b.correctCount}/{b.totalCount}
+                        </td>
+                        <td className="py-1 px-2 text-right tabular-nums font-bold">
+                          {b.accuracyPercent}%
+                        </td>
+                        <td className="py-1 px-2">
+                          {b.isWeakest ? 'Yếu nhất' : 'Bình thường'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
         </div>
@@ -2153,36 +2157,38 @@ export const TeacherSessionResultsOverview: React.FC<
                   </div>
                 ) : (
                   <div className="border border-slate-200 rounded-lg overflow-hidden">
-                    <table
-                      data-testid="drawer-wrong-students-table"
-                      className="w-full text-left border-collapse text-xs"
-                    >
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600">
-                          <th className="py-2 px-3">Học sinh</th>
-                          <th className="py-2 px-3">Phương án đã chọn</th>
-                          <th className="py-2 px-3 text-right">Thời gian</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {activeQuestionDrawerData.wrongStudents.map((ws) => (
-                          <tr key={ws.attemptId}>
-                            <td className="py-2 px-3 font-semibold text-slate-900">
-                              {ws.fullName}{' '}
-                              <span className="font-normal text-slate-500">
-                                ({ws.className})
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 text-rose-800 font-medium">
-                              {ws.selectedAnswerDisplay}
-                            </td>
-                            <td className="py-2 px-3 text-right text-slate-600 tabular-nums">
-                              {ws.timeSpentSeconds}s
-                            </td>
+                    <div className="w-full overflow-x-auto -mx-1 px-1">
+                      <table
+                        data-testid="drawer-wrong-students-table"
+                        className="w-full text-left border-collapse text-xs"
+                      >
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600">
+                            <th className="py-2 px-3">Học sinh</th>
+                            <th className="py-2 px-3">Phương án đã chọn</th>
+                            <th className="py-2 px-3 text-right">Thời gian</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {activeQuestionDrawerData.wrongStudents.map((ws) => (
+                            <tr key={ws.attemptId}>
+                              <td className="py-2 px-3 font-semibold text-slate-900">
+                                {ws.fullName}{' '}
+                                <span className="font-normal text-slate-500">
+                                  ({ws.className})
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 text-rose-800 font-medium">
+                                {ws.selectedAnswerDisplay}
+                              </td>
+                              <td className="py-2 px-3 text-right text-slate-600 tabular-nums">
+                                {ws.timeSpentSeconds}s
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2327,53 +2333,55 @@ export const TeacherSessionResultsOverview: React.FC<
                   {activeStudentDrawerData.questions.length} câu)
                 </h5>
                 <div className="border border-slate-200 rounded-lg overflow-hidden">
-                  <table
-                    data-testid="student-drawer-questions-table"
-                    className="w-full text-left border-collapse text-xs"
-                  >
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600">
-                        <th className="py-2 px-2.5">Câu</th>
-                        <th className="py-2 px-2.5">Nội dung</th>
-                        <th className="py-2 px-2.5">Đã chọn</th>
-                        <th className="py-2 px-2.5">Đáp án đúng</th>
-                        <th className="py-2 px-2.5">Kết quả</th>
-                        <th className="py-2 px-2.5 text-right">Thời gian</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {activeStudentDrawerData.questions.map((q) => (
-                        <tr key={q.questionId}>
-                          <td className="py-2 px-2.5 font-mono font-bold text-slate-700 tabular-nums">
-                            #{q.orderNumber}
-                          </td>
-                          <td className="py-2 px-2.5 text-slate-900 max-w-[180px] truncate">
-                            {q.prompt}
-                          </td>
-                          <td className="py-2 px-2.5 font-semibold text-slate-800">
-                            {q.userAnswerDisplay}
-                          </td>
-                          <td className="py-2 px-2.5 font-bold text-teal-900">
-                            {q.correctAnswerDisplay}
-                          </td>
-                          <td className="py-2 px-2.5 whitespace-nowrap">
-                            {q.isCorrect ? (
-                              <span className="px-1.5 py-0.5 rounded bg-teal-800 text-white font-bold text-[10px]">
-                                Đúng
-                              </span>
-                            ) : (
-                              <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-900 border border-rose-300 font-bold text-[10px]">
-                                Sai
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-2 px-2.5 text-right text-slate-600 tabular-nums whitespace-nowrap">
-                            {formatDurationMmSs(q.timeSpentSeconds)}
-                          </td>
+                  <div className="w-full overflow-x-auto -mx-1 px-1">
+                    <table
+                      data-testid="student-drawer-questions-table"
+                      className="w-full text-left border-collapse text-xs"
+                    >
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600">
+                          <th className="py-2 px-2.5">Câu</th>
+                          <th className="py-2 px-2.5">Nội dung</th>
+                          <th className="py-2 px-2.5">Đã chọn</th>
+                          <th className="py-2 px-2.5">Đáp án đúng</th>
+                          <th className="py-2 px-2.5">Kết quả</th>
+                          <th className="py-2 px-2.5 text-right">Thời gian</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {activeStudentDrawerData.questions.map((q) => (
+                          <tr key={q.questionId}>
+                            <td className="py-2 px-2.5 font-mono font-bold text-slate-700 tabular-nums">
+                              #{q.orderNumber}
+                            </td>
+                            <td className="py-2 px-2.5 text-slate-900 max-w-[180px] truncate">
+                              {q.prompt}
+                            </td>
+                            <td className="py-2 px-2.5 font-semibold text-slate-800">
+                              {q.userAnswerDisplay}
+                            </td>
+                            <td className="py-2 px-2.5 font-bold text-teal-900">
+                              {q.correctAnswerDisplay}
+                            </td>
+                            <td className="py-2 px-2.5 whitespace-nowrap">
+                              {q.isCorrect ? (
+                                <span className="px-1.5 py-0.5 rounded bg-teal-800 text-white font-bold text-[10px]">
+                                  Đúng
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-900 border border-rose-300 font-bold text-[10px]">
+                                  Sai
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 px-2.5 text-right text-slate-600 tabular-nums whitespace-nowrap">
+                              {formatDurationMmSs(q.timeSpentSeconds)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 
@@ -2625,34 +2633,36 @@ export const TeacherSessionResultsOverview: React.FC<
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
                   4. 5 câu hỏi khó nhất của ca thi
                 </h3>
-                <table
-                  data-testid="a4-hardest-questions-table"
-                  className="w-full text-left border-collapse text-xs border border-slate-200"
-                >
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 font-bold">
-                      <th className="py-1.5 px-2">Câu</th>
-                      <th className="py-1.5 px-2">Nội dung câu hỏi</th>
-                      <th className="py-1.5 px-2">Chuyên đề</th>
-                      <th className="py-1.5 px-2 text-right">Tỉ lệ đúng</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {hardestFiveQuestions.map((hq) => (
-                      <tr key={hq.questionId}>
-                        <td className="py-1.5 px-2 font-mono font-bold">
-                          #{hq.orderNumber}
-                        </td>
-                        <td className="py-1.5 px-2 whitespace-pre-wrap break-words">{hq.prompt}</td>
-                        <td className="py-1.5 px-2">{hq.shortTopicLabel}</td>
-                        <td className="py-1.5 px-2 text-right font-bold tabular-nums">
-                          {hq.accuracyPercent}% ({hq.correctCount}/
-                          {hq.totalStudents})
-                        </td>
+                <div className="w-full overflow-x-auto -mx-1 px-1">
+                  <table
+                    data-testid="a4-hardest-questions-table"
+                    className="w-full text-left border-collapse text-xs border border-slate-200"
+                  >
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 font-bold">
+                        <th className="py-1.5 px-2">Câu</th>
+                        <th className="py-1.5 px-2">Nội dung câu hỏi</th>
+                        <th className="py-1.5 px-2">Chuyên đề</th>
+                        <th className="py-1.5 px-2 text-right">Tỉ lệ đúng</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {hardestFiveQuestions.map((hq) => (
+                        <tr key={hq.questionId}>
+                          <td className="py-1.5 px-2 font-mono font-bold">
+                            #{hq.orderNumber}
+                          </td>
+                          <td className="py-1.5 px-2 whitespace-pre-wrap break-words">{hq.prompt}</td>
+                          <td className="py-1.5 px-2">{hq.shortTopicLabel}</td>
+                          <td className="py-1.5 px-2 text-right font-bold tabular-nums">
+                            {hq.accuracyPercent}% ({hq.correctCount}/
+                            {hq.totalStudents})
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {/* 5. Danh sách học sinh chưa đạt */}
@@ -2667,39 +2677,41 @@ export const TeacherSessionResultsOverview: React.FC<
                     điểm.
                   </div>
                 ) : (
-                  <table
-                    data-testid="a4-failed-students-table"
-                    className="w-full text-left border-collapse text-xs border border-slate-200"
-                  >
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 font-bold">
-                        <th className="py-1.5 px-2">Hạng</th>
-                        <th className="py-1.5 px-2">Họ và tên</th>
-                        <th className="py-1.5 px-2">Lớp</th>
-                        <th className="py-1.5 px-2 text-right">Điểm</th>
-                        <th className="py-1.5 px-2 text-right">Câu đúng</th>
-                        <th className="py-1.5 px-2">Kiểu nộp</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {failedStudentsList.map((fs) => (
-                        <tr key={fs.attemptId}>
-                          <td className="py-1 px-2 font-mono">#{fs.rank}</td>
-                          <td className="py-1 px-2 font-semibold">
-                            {fs.fullName}
-                          </td>
-                          <td className="py-1 px-2">{fs.className}</td>
-                          <td className="py-1 px-2 text-right font-bold tabular-nums">
-                            {fs.score}
-                          </td>
-                          <td className="py-1 px-2 text-right tabular-nums">
-                            {fs.correctCount}/{fs.totalQuestions}
-                          </td>
-                          <td className="py-1 px-2">{fs.submitReasonLabel}</td>
+                  <div className="w-full overflow-x-auto -mx-1 px-1">
+                    <table
+                      data-testid="a4-failed-students-table"
+                      className="w-full text-left border-collapse text-xs border border-slate-200"
+                    >
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 font-bold">
+                          <th className="py-1.5 px-2">Hạng</th>
+                          <th className="py-1.5 px-2">Họ và tên</th>
+                          <th className="py-1.5 px-2">Lớp</th>
+                          <th className="py-1.5 px-2 text-right">Điểm</th>
+                          <th className="py-1.5 px-2 text-right">Câu đúng</th>
+                          <th className="py-1.5 px-2">Kiểu nộp</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {failedStudentsList.map((fs) => (
+                          <tr key={fs.attemptId}>
+                            <td className="py-1 px-2 font-mono">#{fs.rank}</td>
+                            <td className="py-1 px-2 font-semibold">
+                              {fs.fullName}
+                            </td>
+                            <td className="py-1 px-2">{fs.className}</td>
+                            <td className="py-1 px-2 text-right font-bold tabular-nums">
+                              {fs.score}
+                            </td>
+                            <td className="py-1 px-2 text-right tabular-nums">
+                              {fs.correctCount}/{fs.totalQuestions}
+                            </td>
+                            <td className="py-1 px-2">{fs.submitReasonLabel}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             </div>

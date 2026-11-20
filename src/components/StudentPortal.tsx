@@ -21,6 +21,7 @@ import {
   RotateCcw,
   Settings2,
   Shuffle,
+  SlidersHorizontal,
   Sparkles,
   Star,
   Target,
@@ -44,17 +45,20 @@ import {
   formatPracticeTimerLabel,
   getCorrectAnswerBreakdown,
   getUserAnswerBreakdown,
+  isQuestionAnswered,
   resolvePracticeSessionPool,
 } from '../utils/scoring';
 import {
   extractStudentGivenName,
   formatCompactStudyDuration,
   getAvatarInitial,
+  hasAnyAnswerProgress,
 } from '../utils/uiFormatting';
 import { ThemeToggleButton } from '../context/ThemeContext';
 import { resolveDepartmentLogoUrl } from '../utils/branding';
 import { LiveExamTab } from './LiveExamTab';
 import { MockExamView } from './MockExamView';
+import { MobileQuestionNavBar } from './MobileQuestionNavBar';
 import { QuestionFontScale, QuestionRenderer } from './QuestionRenderer';
 import { SharedTopicList } from './SharedTopicList';
 import { examSessionApi } from '../services/examSessionApi';
@@ -148,6 +152,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const [isPracticeSessionActive, setIsPracticeSessionActive] = useState<boolean>(false);
   const [practiceElapsedSeconds, setPracticeElapsedSeconds] = useState<number>(0);
   const [showFilterDrawerInPractice, setShowFilterDrawerInPractice] =
+    useState<boolean>(false);
+  const [showMobilePracticeTools, setShowMobilePracticeTools] =
     useState<boolean>(false);
 
   // Tối ưu hiển thị Giao diện Tập trung (Focus Mode) dùng chung cho Luyện tập & Thi thử
@@ -450,6 +456,87 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     return { checkedCount, correctCount, progressPercent };
   }, [filteredPracticeQuestions, practiceCheckedMap, practiceAnswers]);
 
+  // Số câu đã có thao tác trả lời (toàn phần hoặc một phần) trong phiên Luyện tập hiện tại
+  const practiceAnsweredCount = useMemo(
+    () =>
+      filteredPracticeQuestions.reduce(
+        (acc, q) =>
+          acc +
+          (isQuestionAnswered(q, practiceAnswers[q.id]) ||
+          hasAnyAnswerProgress(practiceAnswers[q.id])
+            ? 1
+            : 0),
+        0
+      ),
+    [filteredPracticeQuestions, practiceAnswers]
+  );
+
+  const [mockExamAnsweredCount, setMockExamAnsweredCount] = useState<number>(0);
+  const [exitConfirmDialog, setExitConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!exitConfirmDialog) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setExitConfirmDialog(null);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [exitConfirmDialog]);
+
+  // Bảo vệ học sinh không mất bài đang làm dở khi thoát hoặc chuyển tab
+  const requestProtectedLeave = (
+    onProceed: () => void,
+    context: 'exit-practice' | 'switch-tab' = 'switch-tab'
+  ) => {
+    const isUnfinishedPractice =
+      activeTab === 'practice' &&
+      isPracticeSessionActive &&
+      !isPracticeSetupOpen &&
+      practiceAnsweredCount > 0;
+
+    if (isUnfinishedPractice) {
+      setExitConfirmDialog({
+        title:
+          context === 'exit-practice'
+            ? 'Thoát phiên luyện tập hiện tại?'
+            : 'Chuyển sang mục khác khi đang luyện tập?',
+        message: `Bạn đã trả lời ${practiceAnsweredCount}/${filteredPracticeQuestions.length} câu trong phiên luyện tập này. Bạn có chắc muốn rời khỏi phiên hiện tại không?`,
+        confirmLabel:
+          context === 'exit-practice' ? 'Rời phiên luyện tập' : 'Vẫn chuyển mục',
+        onConfirm: () => {
+          setExitConfirmDialog(null);
+          onProceed();
+        },
+      });
+      return;
+    }
+
+    const isUnfinishedMockExam =
+      activeTab === 'exam' && isMockExamInProgress && mockExamAnsweredCount > 0;
+
+    if (isUnfinishedMockExam) {
+      setExitConfirmDialog({
+        title: 'Rời phòng thi thử chưa nộp bài?',
+        message: `Bạn đã trả lời ${mockExamAnsweredCount} câu trong bài thi thử hiện tại. Nếu chuyển mục ngay bây giờ, tiến độ bài thi chưa nộp sẽ bị mất.`,
+        confirmLabel: 'Rời phòng thi',
+        onConfirm: () => {
+          setExitConfirmDialog(null);
+          onProceed();
+        },
+      });
+      return;
+    }
+
+    onProceed();
+  };
+
   // Bắt đầu phiên luyện tập từ Hộp thoại Cấu hình — Khóa cố định danh sách câu hỏi và tự động ẩn Header
   const handleStartPracticeSession = () => {
     const lockedIds = buildLockedPracticeSessionIds();
@@ -467,13 +554,18 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   };
 
   // Thoát chế độ luyện tập quay về trang Tổng quan và hiện lại thanh Header
-  const handleExitPracticeSession = () => {
+  const executeExitPracticeSession = () => {
     setIsPracticeSessionActive(false);
     setIsPracticeSetupOpen(false);
     setIsZenHeaderHidden(false);
     setShowFilterDrawerInPractice(false);
+    setShowMobilePracticeTools(false);
     setActiveTab('dashboard');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleExitPracticeSession = () => {
+    requestProtectedLeave(executeExitPracticeSession, 'exit-practice');
   };
 
   // Phím tắt bàn phím nhanh trong Chế độ Luyện tập (← Câu trước, → Câu tiếp, Enter Kiểm tra đáp án)
@@ -575,11 +667,33 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     (activeTab === 'exam' && isMockExamInProgress) ||
     (activeTab === 'live-exam' && isLiveExamInProgress);
 
-  const handleSelectPracticeTab = () => {
-    setActiveTab('practice');
-    if (!isPracticeSessionActive) {
-      setIsPracticeSetupOpen(true);
+  const handleProtectedTabSwitch = (nextTab: StudentTab, afterSwitch?: () => void) => {
+    if (activeTab === nextTab) {
+      afterSwitch?.();
+      return;
     }
+    requestProtectedLeave(() => {
+      if (activeTab === 'practice' && isPracticeSessionActive) {
+        setIsPracticeSessionActive(false);
+        setIsZenHeaderHidden(false);
+        setShowMobilePracticeTools(false);
+      }
+      if (activeTab === 'exam' && isMockExamInProgress) {
+        setIsMockExamInProgress(false);
+        setMockExamAnsweredCount(0);
+        setIsZenHeaderHidden(false);
+      }
+      setActiveTab(nextTab);
+      afterSwitch?.();
+    }, 'switch-tab');
+  };
+
+  const handleSelectPracticeTab = () => {
+    handleProtectedTabSwitch('practice', () => {
+      if (!isPracticeSessionActive) {
+        setIsPracticeSetupOpen(true);
+      }
+    });
   };
 
   const navItems: Array<{
@@ -595,7 +709,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       label: 'Tổng quan',
       testId: 'nav-tab-dashboard',
       icon: Target,
-      onClick: () => setActiveTab('dashboard'),
+      onClick: () => handleProtectedTabSwitch('dashboard'),
     },
     {
       id: 'practice',
@@ -610,30 +724,35 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       testId: 'nav-tab-mistakes',
       icon: AlertTriangle,
       badgeCount: wrongQuestionIds.length,
-      onClick: () => setActiveTab('mistakes'),
+      onClick: () => handleProtectedTabSwitch('mistakes'),
     },
     {
       id: 'exam',
       label: 'Thi thử',
       testId: 'nav-tab-exam',
       icon: Award,
-      onClick: () => setActiveTab('exam'),
+      onClick: () => handleProtectedTabSwitch('exam'),
     },
     {
       id: 'live-exam',
       label: 'Thi ngay',
       testId: 'nav-tab-live-exam',
       icon: KeyRound,
-      onClick: () => setActiveTab('live-exam'),
+      onClick: () => handleProtectedTabSwitch('live-exam'),
     },
     {
       id: 'history',
       label: 'Lịch sử phòng thi',
       testId: 'nav-tab-history',
       icon: History,
-      onClick: () => setActiveTab('history'),
+      onClick: () => handleProtectedTabSwitch('history'),
     },
   ];
+
+  const isActiveFocusExam =
+    (activeTab === 'exam' && isMockExamInProgress) ||
+    (activeTab === 'live-exam' && isLiveExamInProgress);
+  const isMobilePortalTopBarVisible = !isZenHeaderHidden && !isActiveFocusExam;
 
   return (
     <div className="min-h-screen bg-[var(--color-bg-canvas)] flex flex-col md:flex-row">
@@ -659,7 +778,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 href="#student-home"
                 onClick={(e) => {
                   e.preventDefault();
-                  setActiveTab('dashboard');
+                  handleProtectedTabSwitch('dashboard');
                 }}
                 className="flex items-center gap-2.5 min-w-0"
               >
@@ -825,15 +944,18 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         </aside>
       )}
 
-      {/* Mobile Top Bar & Drawer (< 768px) */}
-      {!isZenHeaderHidden && (
-        <div className="md:hidden bg-[var(--color-bg-surface)] border-b border-[var(--color-border-subtle)] sticky top-0 z-30">
+      {/* Mobile Top Bar & Drawer (< 768px) — tự động ẩn khi vào Phòng Thi Tập trung (Thi thử / Thi ngay) */}
+      {isMobilePortalTopBarVisible && (
+        <div
+          data-testid="student-mobile-top-bar"
+          className="md:hidden bg-[var(--color-bg-surface)] border-b border-[var(--color-border-subtle)] sticky top-0 z-30 pt-[env(safe-area-inset-top)]"
+        >
           <div className="h-14 px-4 flex items-center justify-between">
             <a
               href="#student-home"
               onClick={(e) => {
                 e.preventDefault();
-                setActiveTab('dashboard');
+                handleProtectedTabSwitch('dashboard');
               }}
               className="flex items-center gap-2 text-[15px] font-bold tracking-tight text-teal-900 dark:text-teal-300"
             >
@@ -974,7 +1096,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             TAB 1: CHẾ ĐỘ LUYỆN TẬP (CÓ HỘP THOẠI CHỌN SỐ CÂU & THỜI GIAN TRƯỚC KHI VÀO LÀM + GIAO DIỆN TẬP TRUNG)
            ===================================================================== */}
         {activeTab === 'practice' && (
-          <div data-testid="practice-focus-workspace" className="space-y-2.5">
+          <div
+            data-testid="practice-focus-workspace"
+            className="space-y-2.5 pb-24 lg:pb-8"
+          >
             {/* HỘP THOẠI CẤU HÌNH PHIÊN LUYỆN TẬP TRƯỚC KHI VÀO LÀM */}
             {isPracticeSetupOpen && (
               <div
@@ -1072,7 +1197,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 setPracticeCustomCount(num);
                               }
                             }}
-                            className="w-full px-3 py-2 text-xs sm:text-sm font-semibold rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                            className="w-full px-3 py-2 text-base sm:text-sm font-semibold rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
                           >
                             <option value="ALL">
                               Làm tất cả ({baseFilteredQuestions.length} câu hỏi)
@@ -1140,7 +1265,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 setPracticeCustomCount(val);
                                 setPracticeDrawSize(String(val));
                               }}
-                              className="w-full pl-3 pr-16 py-2 text-xs sm:text-sm font-mono font-bold rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 tabular-nums"
+                              className="w-full pl-3 pr-16 py-2 text-base sm:text-sm font-mono font-bold rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 tabular-nums"
                             />
                             <span className="absolute right-3 text-xs font-semibold text-slate-400 pointer-events-none">
                               câu hỏi
@@ -1191,7 +1316,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                 );
                               }
                             }}
-                            className="w-full px-3 py-2 text-xs sm:text-sm font-semibold rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                            className="w-full px-3 py-2 text-base sm:text-sm font-semibold rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
                           >
                             <option value="0">
                               ∞ Không giới hạn thời gian (Tự do ôn tập)
@@ -1243,7 +1368,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                                   )
                                 )
                               }
-                              className="w-full pl-3 pr-16 py-2 text-xs sm:text-sm font-mono font-bold rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 tabular-nums"
+                              className="w-full pl-3 pr-16 py-2 text-base sm:text-sm font-mono font-bold rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500 tabular-nums"
                             />
                             <span className="absolute right-3 text-xs font-semibold text-slate-400 pointer-events-none">
                               phút
@@ -1267,7 +1392,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         id="setup-practice-topic"
                         value={practiceTopic}
                         onChange={(e) => setPracticeTopic(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm font-medium text-slate-900"
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-base sm:text-sm font-medium text-slate-900"
                       >
                         <option value="ALL">Tất cả 4 chuyên đề kiến thức</option>
                         {CERTIPORT_TOPICS.map((t) => (
@@ -1291,7 +1416,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         onChange={(e) =>
                           setPracticeType(e.target.value as QuestionTypeFilter)
                         }
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm font-medium text-slate-900"
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-base sm:text-sm font-medium text-slate-900"
                       >
                         {QUESTION_FILTER_OPTIONS.map((opt) => (
                           <option key={opt.value} value={opt.value}>
@@ -1366,19 +1491,24 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               </div>
             )}
 
-            {/* THANH ĐIỀU KHIỂN ÔN THI TẬP TRUNG SIÊU GỌN (1 DÒNG ~38PX) */}
+            {/* THANH ĐIỀU KHIỂN ÔN THI TẬP TRUNG SIÊU GỌN (KHÔNG ĐÈ MOBILE TOP BAR) */}
             <section
               aria-label="Thanh điều khiển Chế độ Luyện tập Tập trung"
               data-testid="practice-focus-command-bar"
-              className="sticky top-1.5 z-20 bg-white/95 backdrop-blur-xs border border-slate-200 rounded-lg px-3 py-1.5 shadow-2xs space-y-1.5"
+              className={`sticky ${
+                isMobilePortalTopBarVisible
+                  ? 'top-14 md:top-1.5 z-20'
+                  : 'top-0 md:top-1.5 z-30 pt-[env(safe-area-inset-top)] md:pt-0'
+              } bg-white/95 backdrop-blur-xs border border-slate-200 rounded-lg px-3 py-1.5 shadow-2xs space-y-1.5`}
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="px-2.5 py-1 rounded-md bg-teal-800 text-white text-[11px] font-bold tracking-wide tabular-nums">
-                    LUYỆN TẬP · CÂU {Math.min(practiceIndex + 1, filteredPracticeQuestions.length)}/{filteredPracticeQuestions.length}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <span className="px-2.5 py-1 rounded-md bg-teal-800 text-white text-[11px] font-bold tracking-wide tabular-nums whitespace-nowrap">
+                    <span className="hidden sm:inline">LUYỆN TẬP · </span>
+                    CÂU {Math.min(practiceIndex + 1, filteredPracticeQuestions.length)}/{filteredPracticeQuestions.length}
                   </span>
 
-                  <span className="text-xs font-medium text-slate-700 tabular-nums">
+                  <span className="hidden md:inline text-xs font-medium text-slate-700 tabular-nums">
                     Đã chấm:{' '}
                     <strong className="font-mono text-teal-800">
                       {practiceSessionStats.checkedCount}/{filteredPracticeQuestions.length}
@@ -1390,8 +1520,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   </span>
                 </div>
 
-                {/* Các nút Công cụ Tập trung & Quan sát gọn trên 1 dòng */}
-                <div className="flex flex-wrap items-center gap-1.5">
+                {/* Các nút Công cụ Tập trung & Quan sát (gọn trên mobile, đầy đủ trên md+) */}
+                <div className="flex items-center gap-1.5 shrink-0">
                   {/* Đồng hồ Thời gian (Không giới hạn hoặc Đếm ngược) */}
                   <div
                     data-testid="practice-session-timer"
@@ -1406,102 +1536,117 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     <Clock className="w-3 h-3 shrink-0" />
                     <span>
                       {practiceTimerStatus.isUnlimited
-                        ? `∞ Tự do · ${practiceTimerStatus.displayClock}`
+                        ? `∞ ${practiceTimerStatus.displayClock}`
                         : practiceTimerStatus.isExpired
-                          ? 'Hết giờ! (00:00)'
-                          : `Còn: ${practiceTimerStatus.displayClock}`}
+                          ? 'Hết giờ!'
+                          : practiceTimerStatus.displayClock}
                     </span>
                   </div>
 
-                  {/* Bộ chỉnh cỡ chữ A- / A / A+ */}
-                  <div
-                    className="inline-flex items-center rounded-md border border-slate-200 bg-slate-100 p-0.5 text-[11px]"
-                    role="group"
-                    aria-label="Chỉnh cỡ chữ câu hỏi"
-                  >
+                  {/* Nhóm công cụ phụ hiển thị trực tiếp trên md+ */}
+                  <div className="hidden md:flex flex-wrap items-center gap-1.5">
+                    <div
+                      className="inline-flex items-center rounded-md border border-slate-200 bg-slate-100 p-0.5 text-[11px]"
+                      role="group"
+                      aria-label="Chỉnh cỡ chữ câu hỏi"
+                    >
+                      <button
+                        type="button"
+                        data-testid="font-scale-btn-normal"
+                        onClick={() => setFontScale('normal')}
+                        className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
+                          fontScale === 'normal'
+                            ? 'bg-white text-teal-800 shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        A-
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="font-scale-btn-large"
+                        onClick={() => setFontScale('large')}
+                        className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
+                          fontScale === 'large'
+                            ? 'bg-white text-teal-800 shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        A
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="font-scale-btn-xlarge"
+                        onClick={() => setFontScale('xlarge')}
+                        className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
+                          fontScale === 'xlarge'
+                            ? 'bg-white text-teal-800 shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        A+
+                      </button>
+                    </div>
+
+                    <ThemeToggleButton
+                      variant="compact"
+                      testId="practice-zen-theme-toggle"
+                    />
+
                     <button
                       type="button"
-                      data-testid="font-scale-btn-normal"
-                      onClick={() => setFontScale('normal')}
-                      className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
-                        fontScale === 'normal'
-                          ? 'bg-white text-teal-800 shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
+                      data-testid="toggle-navigator-sidebar-btn"
+                      onClick={() => setIsPracticeNavCollapsed((prev) => !prev)}
+                      className="hidden lg:inline-flex px-2 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 items-center gap-1 cursor-pointer"
                     >
-                      A-
+                      {isPracticeNavCollapsed ? (
+                        <>
+                          <Minimize2 className="w-3 h-3" />
+                          <span>Hiện bảng số</span>
+                        </>
+                      ) : (
+                        <>
+                          <Maximize2 className="w-3 h-3" />
+                          <span>Mở rộng đề</span>
+                        </>
+                      )}
                     </button>
+
                     <button
                       type="button"
-                      data-testid="font-scale-btn-large"
-                      onClick={() => setFontScale('large')}
-                      className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
-                        fontScale === 'large'
-                          ? 'bg-white text-teal-800 shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
+                      data-testid="open-practice-setup-btn"
+                      onClick={() => setIsPracticeSetupOpen(true)}
+                      className="px-2 py-1 rounded-md border border-teal-600 bg-teal-50/80 hover:bg-teal-100 text-[11px] font-bold text-teal-900 inline-flex items-center gap-1 cursor-pointer"
                     >
-                      A
+                      <Settings2 className="w-3 h-3 text-teal-700" />
+                      <span>Cấu hình đề</span>
                     </button>
+
                     <button
                       type="button"
-                      data-testid="font-scale-btn-xlarge"
-                      onClick={() => setFontScale('xlarge')}
-                      className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
-                        fontScale === 'xlarge'
-                          ? 'bg-white text-teal-800 shadow-2xs'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
+                      onClick={() => setShowFilterDrawerInPractice((prev) => !prev)}
+                      className="px-2 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
                     >
-                      A+
+                      <Filter className="w-3 h-3" />
+                      <span>Bộ lọc</span>
                     </button>
                   </div>
 
-                  {/* Nút Chuyển đổi Sáng/Tối ngay trong phiên Luyện tập Tập trung */}
-                  <ThemeToggleButton
-                    variant="compact"
-                    testId="practice-zen-theme-toggle"
-                  />
-
-                  {/* Nút Mở rộng khung đề (Ẩn/Hiện cột danh sách câu hỏi) */}
+                  {/* Nút mở menu công cụ gọn trên điện thoại (< md) */}
                   <button
                     type="button"
-                    data-testid="toggle-navigator-sidebar-btn"
-                    onClick={() => setIsPracticeNavCollapsed((prev) => !prev)}
-                    className="px-2 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                    data-testid="practice-mobile-tools-btn"
+                    aria-label="Mở công cụ luyện tập"
+                    aria-expanded={showMobilePracticeTools}
+                    onClick={() => setShowMobilePracticeTools((prev) => !prev)}
+                    className={`md:hidden min-w-[34px] min-h-[34px] px-2 rounded-md border inline-flex items-center gap-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+                      showMobilePracticeTools
+                        ? 'border-teal-600 bg-teal-50 text-teal-800'
+                        : 'border-slate-300 bg-white text-slate-700'
+                    }`}
                   >
-                    {isPracticeNavCollapsed ? (
-                      <>
-                        <Minimize2 className="w-3 h-3" />
-                        <span>Hiện bảng số</span>
-                      </>
-                    ) : (
-                      <>
-                        <Maximize2 className="w-3 h-3" />
-                        <span>Mở rộng đề</span>
-                      </>
-                    )}
-                  </button>
-
-                  {/* Nút Mở lại Hộp thoại Chọn Số câu & Thời gian */}
-                  <button
-                    type="button"
-                    data-testid="open-practice-setup-btn"
-                    onClick={() => setIsPracticeSetupOpen(true)}
-                    className="px-2 py-1 rounded-md border border-teal-600 bg-teal-50/80 hover:bg-teal-100 text-[11px] font-bold text-teal-900 inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <Settings2 className="w-3 h-3 text-teal-700" />
-                    <span>Cấu hình đề</span>
-                  </button>
-
-                  {/* Nút bật/tắt nhanh bộ lọc phụ */}
-                  <button
-                    type="button"
-                    onClick={() => setShowFilterDrawerInPractice((prev) => !prev)}
-                    className="px-2 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <Filter className="w-3 h-3" />
-                    <span>Bộ lọc</span>
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                    <span className="hidden xs:inline">Công cụ</span>
                   </button>
 
                   {/* Nút Thoát chế độ luyện tập */}
@@ -1509,13 +1654,93 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     type="button"
                     data-testid="exit-practice-session-btn"
                     onClick={handleExitPracticeSession}
-                    className="px-2.5 py-1 rounded-md border border-rose-300 bg-rose-50 hover:bg-rose-600 hover:text-white hover:border-rose-600 text-[11px] font-bold text-rose-700 inline-flex items-center gap-1 transition-colors cursor-pointer"
+                    className="min-h-[34px] md:min-h-0 px-2 sm:px-2.5 py-1 rounded-md border border-rose-300 bg-rose-50 hover:bg-rose-600 hover:text-white hover:border-rose-600 text-[11px] font-bold text-rose-700 inline-flex items-center gap-1 transition-colors cursor-pointer"
                   >
-                    <LogOut className="w-3 h-3" />
-                    <span>Thoát luyện tập</span>
+                    <LogOut className="w-3 h-3 shrink-0" />
+                    <span className="hidden sm:inline">Thoát luyện tập</span>
+                    <span className="sm:hidden">Thoát</span>
                   </button>
                 </div>
               </div>
+
+              {/* Menu công cụ phụ thu gọn trên điện thoại (< md) */}
+              {showMobilePracticeTools && (
+                <div
+                  data-testid="practice-mobile-tools-panel"
+                  className="md:hidden pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs"
+                >
+                  <span className="text-slate-700 font-medium tabular-nums">
+                    Đã chấm <strong>{practiceSessionStats.checkedCount}/{filteredPracticeQuestions.length}</strong> · Đúng <strong className="text-emerald-700">{practiceSessionStats.correctCount}</strong>
+                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div
+                      className="inline-flex items-center rounded-md border border-slate-200 bg-slate-100 p-0.5 text-xs"
+                      role="group"
+                      aria-label="Chỉnh cỡ chữ câu hỏi"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setFontScale('normal')}
+                        className={`px-2 py-1 rounded font-bold cursor-pointer ${
+                          fontScale === 'normal'
+                            ? 'bg-white text-teal-800 shadow-2xs'
+                            : 'text-slate-600'
+                        }`}
+                      >
+                        A-
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFontScale('large')}
+                        className={`px-2 py-1 rounded font-bold cursor-pointer ${
+                          fontScale === 'large'
+                            ? 'bg-white text-teal-800 shadow-2xs'
+                            : 'text-slate-600'
+                        }`}
+                      >
+                        A
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFontScale('xlarge')}
+                        className={`px-2 py-1 rounded font-bold cursor-pointer ${
+                          fontScale === 'xlarge'
+                            ? 'bg-white text-teal-800 shadow-2xs'
+                            : 'text-slate-600'
+                        }`}
+                      >
+                        A+
+                      </button>
+                    </div>
+
+                    <ThemeToggleButton
+                      variant="compact"
+                      testId="practice-zen-theme-toggle-mobile"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMobilePracticeTools(false);
+                        setIsPracticeSetupOpen(true);
+                      }}
+                      className="px-2.5 py-1.5 rounded-md border border-teal-600 bg-teal-50 text-xs font-bold text-teal-900 inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Settings2 className="w-3.5 h-3.5 text-teal-700" />
+                      <span>Cấu hình đề</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowFilterDrawerInPractice((prev) => !prev)}
+                      className="px-2.5 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-semibold text-slate-700 inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Filter className="w-3.5 h-3.5" />
+                      <span>Bộ lọc</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Ngăn kéo Bộ lọc nhanh (chỉ mở khi học sinh bấm nút "Bộ lọc") */}
               {showFilterDrawerInPractice && (
@@ -1538,7 +1763,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         );
                         setPracticeIndex(0);
                       }}
-                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-900"
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-base sm:text-sm font-medium text-slate-900"
                     >
                       <option value="ALL">Tất cả 4 chuyên đề kiến thức</option>
                       {CERTIPORT_TOPICS.map((t) => (
@@ -1567,7 +1792,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         );
                         setPracticeIndex(0);
                       }}
-                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-900"
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-base sm:text-sm font-medium text-slate-900"
                     >
                       {QUESTION_FILTER_OPTIONS.map((opt) => (
                         <option key={opt.value} value={opt.value}>
@@ -1679,7 +1904,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       />
 
                       <div className="bg-white border border-slate-200 rounded-xl px-3.5 py-2 flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
+                        <div className="hidden lg:flex items-center gap-2">
                           <button
                             type="button"
                             disabled={practiceIndex === 0}
@@ -1738,11 +1963,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   )}
                 </div>
 
-                {/* BẢNG CÂU HỎI SIÊU GỌN (CHỈ CHUYỂN CÂU KHI BẤM CHỌN) */}
+                {/* BẢNG CÂU HỎI SIÊU GỌN (DESKTOP lg+) */}
                 {!isPracticeNavCollapsed && (
                   <aside
                     data-testid="practice-question-navigator"
-                    className="w-full lg:w-56 xl:w-60 shrink-0 bg-white border border-slate-200 rounded-xl p-2.5 space-y-2 sticky top-12"
+                    className="hidden lg:block w-full lg:w-56 xl:w-60 shrink-0 bg-white border border-slate-200 rounded-xl p-2.5 space-y-2 sticky top-12"
                   >
                     <div className="flex items-center justify-between gap-1">
                       <h3 className="text-[11px] font-bold text-slate-900">
@@ -1813,6 +2038,79 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 )}
               </div>
             )}
+
+            {/* Thanh điều hướng cố định đáy màn hình & Ngăn kéo lưới câu hỏi cho Mobile/Tablet (< lg) */}
+            {filteredPracticeQuestions.length > 0 && !isPracticeSetupOpen && (
+              <MobileQuestionNavBar
+                testIdPrefix="practice"
+                currentIndex={practiceIndex}
+                totalQuestions={filteredPracticeQuestions.length}
+                summaryText={`Chấm ${practiceSessionStats.checkedCount}/${filteredPracticeQuestions.length} · Đúng ${practiceSessionStats.correctCount}`}
+                sheetTitle={`Bảng câu hỏi luyện tập (${filteredPracticeQuestions.length} câu)`}
+                legendItems={[
+                  {
+                    key: 'correct',
+                    label: 'Đúng',
+                    swatchClassName: 'bg-emerald-600',
+                  },
+                  {
+                    key: 'wrong',
+                    label: 'Sai',
+                    swatchClassName: 'bg-rose-500',
+                  },
+                  {
+                    key: 'unchecked',
+                    label: 'Chưa chấm',
+                    swatchClassName: 'bg-white border border-slate-300',
+                  },
+                ]}
+                items={filteredPracticeQuestions.map((q, idx) => {
+                  const isCurrent = idx === practiceIndex;
+                  const isBookmarked = bookmarkedIds.includes(q.id);
+                  const checkedHere = Boolean(practiceCheckedMap[q.id]);
+                  const localCorrect =
+                    checkedHere && evaluateQuestion(q, practiceAnswers[q.id]);
+                  const savedStat = practiceProgress[q.id];
+
+                  let cellClassName =
+                    'border-slate-200 bg-slate-50 text-slate-700 hover:border-teal-600';
+                  if (checkedHere) {
+                    cellClassName = localCorrect
+                      ? 'border-emerald-700 bg-emerald-600 text-white font-bold'
+                      : 'border-rose-600 bg-rose-500 text-white font-bold';
+                  } else if (savedStat) {
+                    cellClassName = savedStat.isCorrect
+                      ? 'border-emerald-300 bg-emerald-50 text-emerald-900 font-semibold'
+                      : 'border-rose-300 bg-rose-50 text-rose-900 font-semibold';
+                  }
+
+                  if (isCurrent) {
+                    cellClassName +=
+                      ' ring-2 ring-teal-700 ring-offset-1 font-extrabold';
+                  }
+
+                  return {
+                    id: q.id,
+                    index: idx,
+                    label: String(idx + 1),
+                    ariaLabel: `Câu ${idx + 1}${
+                      checkedHere ? (localCorrect ? ', đã trả lời đúng' : ', đã trả lời sai') : ', chưa chấm'
+                    }`,
+                    cellClassName,
+                    isCurrent,
+                    isBookmarked,
+                    dataAnswered: checkedHere,
+                  };
+                })}
+                onPrev={() => setPracticeIndex((i) => Math.max(0, i - 1))}
+                onNext={() =>
+                  setPracticeIndex((i) =>
+                    Math.min(filteredPracticeQuestions.length - 1, i + 1)
+                  )
+                }
+                onSelectIndex={(idx) => setPracticeIndex(idx)}
+              />
+            )}
           </div>
         )}
 
@@ -1847,7 +2145,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       setMistakeTopicFilter(e.target.value);
                       setMistakeIndex(0);
                     }}
-                    className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-800"
+                    className="px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-base sm:text-sm font-semibold text-slate-800"
                   >
                     <option value="ALL">
                       Tất cả chuyên đề ({wrongQuestionIds.length} câu sai)
@@ -2275,7 +2573,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             onExamPhaseChange={(inProgress) => {
               setIsMockExamInProgress(inProgress);
               setIsZenHeaderHidden(inProgress);
+              if (!inProgress) {
+                setMockExamAnsweredCount(0);
+              }
             }}
+            onAnsweredCountChange={setMockExamAnsweredCount}
           />
         )}
 
@@ -2710,6 +3012,60 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           </div>
         )}
       </main>
+
+      {/* Hộp thoại Xác nhận Thoát / Chuyển mục khi phiên Luyện tập hoặc Thi thử đang làm dở */}
+      {exitConfirmDialog && (
+        <div
+          data-testid="exit-session-confirm-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="exit-session-confirm-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setExitConfirmDialog(null);
+            }
+          }}
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-[1px] flex items-center justify-center p-4"
+        >
+          <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <span className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </span>
+              <div className="space-y-1 min-w-0">
+                <h3
+                  id="exit-session-confirm-title"
+                  className="text-base font-bold text-[var(--color-text-primary)]"
+                >
+                  {exitConfirmDialog.title}
+                </h3>
+                <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+                  {exitConfirmDialog.message}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 pt-1">
+              <button
+                type="button"
+                data-testid="exit-session-cancel-btn"
+                onClick={() => setExitConfirmDialog(null)}
+                className="min-h-[42px] px-4 py-2 rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] hover:bg-slate-50 text-sm font-semibold text-[var(--color-text-primary)] cursor-pointer"
+              >
+                Tiếp tục làm bài
+              </button>
+              <button
+                type="button"
+                data-testid="exit-session-confirm-btn"
+                onClick={exitConfirmDialog.onConfirm}
+                className="min-h-[42px] px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold cursor-pointer"
+              >
+                {exitConfirmDialog.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -55,16 +55,16 @@ test('computeClassAnalytics computes topicCompetency (4 topics) and typeCompeten
   }
 });
 
-test('buildSampleStudentImportExcelBytes and parseStudentsFromExcelBytes round-trip bulk student list', () => {
-  const bytes = buildSampleStudentImportExcelBytes();
-  const students = parseStudentsFromExcelBytes(bytes);
+test('buildSampleStudentImportExcelBytes and parseStudentsFromExcelBytes round-trip bulk student list', async () => {
+  const bytes = await buildSampleStudentImportExcelBytes();
+  const students = await parseStudentsFromExcelBytes(bytes);
   assert.equal(students.length, 3);
   assert.equal(students[0].username, 'HS003');
   assert.equal(students[0].role, 'student');
 });
 
-test('buildClassReportWorkbookBytes creates a 3-sheet .xlsx workbook with TongHopKetQuaHocSinh, ChiTietLichSuThiThu, and ThongKeCauHoiHaySai', () => {
-  const bytes = buildClassReportWorkbookBytes(
+test('buildClassReportWorkbookBytes creates a 3-sheet .xlsx workbook with TongHopKetQuaHocSinh, ChiTietLichSuThiThu, and ThongKeCauHoiHaySai', async () => {
+  const bytes = await buildClassReportWorkbookBytes(
     TEST_FIXTURE_QUESTIONS,
     TEST_FIXTURE_USERS,
     TEST_FIXTURE_ATTEMPTS

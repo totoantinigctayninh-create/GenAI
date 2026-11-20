@@ -278,12 +278,12 @@ export const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
       aria-modal="true"
       aria-labelledby="question-editor-modal-title"
       onPaste={handleModalPaste}
-      className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-2.5 sm:p-6 overflow-y-auto"
     >
-      <div className="bg-white border border-slate-200 rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-xl overflow-hidden my-auto">
-        {/* Header Modal */}
-        <div className="px-6 py-4 bg-sky-50/80 border-b border-slate-200 flex items-center justify-between gap-4 shrink-0">
-          <div>
+      <div className="bg-white border border-slate-200 rounded-2xl max-w-4xl w-full max-h-[90dvh] flex flex-col shadow-xl overflow-hidden my-auto">
+        {/* Header Modal cố định */}
+        <div className="sticky top-0 z-10 px-4 sm:px-6 py-3.5 sm:py-4 bg-sky-50/90 border-b border-slate-200 flex items-center justify-between gap-3 shrink-0">
+          <div className="min-w-0">
             <div className="text-xs font-bold text-teal-800 uppercase tracking-wider">
               {isEditing
                 ? `Chỉnh sửa câu hỏi · Mã ${draft.id.toUpperCase()}`
@@ -291,7 +291,7 @@ export const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
             </div>
             <h2
               id="question-editor-modal-title"
-              className="text-base sm:text-lg font-bold text-slate-900"
+              className="text-sm sm:text-lg font-bold text-slate-900"
             >
               {isEditing
                 ? 'Cập nhật Nội dung, Hình ảnh & Cấu hình Đáp án Chuẩn Certiport'
@@ -303,17 +303,18 @@ export const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Đóng cửa sổ"
-            className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 transition-colors cursor-pointer"
+            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/60 transition-colors cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Body Form cuộn dọc */}
+        {/* Body Form cuộn dọc + Footer cố định */}
         <form
           onSubmit={handleSubmit}
-          className="p-6 space-y-6 overflow-y-auto flex-1"
+          className="flex-1 min-h-0 flex flex-col overflow-hidden"
         >
+          <div className="p-4 sm:p-6 space-y-6 overflow-y-auto overscroll-contain flex-1 min-h-0">
           {errorMsg && (
             <div
               role="alert"
@@ -1006,12 +1007,14 @@ export const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
             />
           </div>
 
-          {/* Footer Modal Actions */}
-          <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3">
+          </div>
+
+          {/* Footer Modal Actions cố định luôn bấm được trên điện thoại */}
+          <div className="sticky bottom-0 z-10 px-4 sm:px-6 py-3 sm:py-4 bg-white border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-xs sm:text-sm font-semibold text-slate-700 cursor-pointer"
+              className="px-4 py-2.5 min-h-[44px] rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-xs sm:text-sm font-semibold text-slate-700 cursor-pointer"
             >
               Hủy bỏ
             </button>
@@ -1019,7 +1022,7 @@ export const QuestionEditorModal: React.FC<QuestionEditorModalProps> = ({
               type="submit"
               data-testid="save-question-modal-btn"
               disabled={isSaving}
-              className="px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-2 shadow-xs cursor-pointer"
+              className="px-5 py-2.5 min-h-[44px] rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-2 shadow-xs cursor-pointer"
             >
               <Save className="w-4 h-4" />
               <span>

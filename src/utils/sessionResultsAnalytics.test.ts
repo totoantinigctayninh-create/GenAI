@@ -180,7 +180,7 @@ test('Bước 7A/8: Kiểm thử với 0 học sinh, 1 học sinh và 40 học s
   assert.equal(reportEnded.matches, true);
 });
 
-test('Bước 7B/8: Phân tích câu hỏi, Bảng học sinh, Drawer chi tiết, Xuất Excel 3 sheet khớp 100%, Cô lập giáo viên & So sánh 2 ca thi', () => {
+test('Bước 7B/8: Phân tích câu hỏi, Bảng học sinh, Drawer chi tiết, Xuất Excel 3 sheet khớp 100%, Cô lập giáo viên & So sánh 2 ca thi', async () => {
   const engine = createTestEngine();
   const sessionA = engine.createSession('gv_1', {
     title: 'Ca thi Chi tiết 7B - Đợt 1',
@@ -296,13 +296,13 @@ test('Bước 7B/8: Phân tích câu hỏi, Bảng học sinh, Drawer chi tiết
   );
 
   // 4) Xuất file Excel (.xlsx) gồm 3 sheet và mở file kiểm tra số liệu khớp 100% với bảng & drawer
-  const excelBytes = buildSessionResultsExcelBytes({
+  const excelBytes = await buildSessionResultsExcelBytes({
     session: detail.session,
     rawRows,
     questionAnalysis,
     violations: detail.violations,
   });
-  const parsedExcel = parseSessionResultsExcelBytes(excelBytes);
+  const parsedExcel = await parseSessionResultsExcelBytes(excelBytes);
   assert.deepEqual(parsedExcel.sheetNames, [
     'Bảng điểm',
     'Phân tích câu hỏi',

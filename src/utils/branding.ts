@@ -4,7 +4,7 @@ import type { UserAccount } from '../types/exam';
  * Logo chính thức của Tổ Toán - Tin · Trường TH-THCS-THPT IGC Tây Ninh
  * Được đóng gói trực tiếp trong ứng dụng để hiển thị tức thì trên mọi trình duyệt/thiết bị.
  */
-export const DEFAULT_DEPARTMENT_LOGO_URL = '/assets/aistudio/logo_d68b723c.png';
+export const DEFAULT_DEPARTMENT_LOGO_URL = '/department-logo.png';
 
 /**
  * Trả về đường dẫn logo hiện tại: ưu tiên logo tùy chỉnh do tài khoản quản trị tải lên,

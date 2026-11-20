@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import {
   CERTIPORT_TOPICS,
   ExamAttempt,
@@ -372,7 +371,8 @@ export function computeClassAnalytics(
 // NHẬP DANH SÁCH HỌC SINH HÀNG LOẠT TỪ EXCEL (.XLSX)
 // ============================================================================
 
-export function buildSampleStudentImportExcelBytes(): Uint8Array {
+export async function buildSampleStudentImportExcelBytes(): Promise<Uint8Array> {
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
   const sampleStudents = [
     {
@@ -411,9 +411,10 @@ function getField(row: Record<string, unknown>, keys: string[]): string {
   return '';
 }
 
-export function parseStudentsFromExcelBytes(
+export async function parseStudentsFromExcelBytes(
   bytes: ArrayBuffer | Uint8Array
-): UserAccount[] {
+): Promise<UserAccount[]> {
+  const XLSX = await import('xlsx');
   const wb = XLSX.read(bytes, { type: 'array' });
   const firstSheet = wb.SheetNames[0];
   if (!firstSheet) {
@@ -503,11 +504,12 @@ export function parseStudentsFromExcelBytes(
 // XUẤT BÁO CÁO KẾT QUẢ LỚP HỌC (.XLSX) GỒM 3 SHEET CHUẨN HỒ SƠ GIẢNG DẠY
 // ============================================================================
 
-export function buildClassReportWorkbookBytes(
+export async function buildClassReportWorkbookBytes(
   questions: Question[],
   users: UserAccount[],
   attempts: ExamAttempt[]
-): Uint8Array {
+): Promise<Uint8Array> {
+  const XLSX = await import('xlsx');
   const analytics = computeClassAnalytics(questions, users, attempts);
   const wb = XLSX.utils.book_new();
 

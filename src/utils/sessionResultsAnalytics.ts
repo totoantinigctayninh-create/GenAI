@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import {
   CERTIPORT_PASS_SCORE,
   CERTIPORT_TOPICS,
@@ -895,12 +894,13 @@ export function buildStudentDrawerDetail(
  * - Sheet 2: "Phân tích câu hỏi"
  * - Sheet 3: "Nhật ký vi phạm"
  */
-export function buildSessionResultsExcelBytes(params: {
+export async function buildSessionResultsExcelBytes(params: {
   session: ExamSessionRecord;
   rawRows: RawScoreTableRow[];
   questionAnalysis: SessionQuestionAnalysisItem[];
   violations: ViolationEventRecord[];
-}): Uint8Array {
+}): Promise<Uint8Array> {
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
 
   // Sheet 1: Bảng điểm
@@ -1030,12 +1030,13 @@ export function buildSessionResultsExcelBytes(params: {
 /**
  * Đọc và kiểm tra lại file Excel (.xlsx) đã xuất (phục vụ kiểm thử tự động Bước 7B/8)
  */
-export function parseSessionResultsExcelBytes(bytes: Uint8Array): {
+export async function parseSessionResultsExcelBytes(bytes: Uint8Array): Promise<{
   sheetNames: string[];
   scoreSheet: Array<Record<string, unknown>>;
   questionSheet: Array<Record<string, unknown>>;
   violationSheet: Array<Record<string, unknown>>;
-} {
+}> {
+  const XLSX = await import('xlsx');
   const wb = XLSX.read(bytes, { type: 'array' });
   const scoreSheet = wb.Sheets['Bảng điểm']
     ? (XLSX.utils.sheet_to_json(wb.Sheets['Bảng điểm']) as Array<

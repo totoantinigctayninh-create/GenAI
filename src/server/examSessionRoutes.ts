@@ -5,22 +5,26 @@ import {
   ExamSessionEngine,
   type UpdateExamSessionInput,
 } from './examSessionEngine.ts';
+import {
+  extractRequestAuthToken,
+  signAuthToken,
+  verifyAuthToken,
+} from './authToken.ts';
 import type { ViolationEventType } from '../types/examSession.ts';
-import type { UserAnswer } from '../types/exam.ts';
+import type { UserAccount, UserAnswer } from '../types/exam.ts';
 
-function extractActorId(req: Request): string {
-  const headerUser = req.header('x-user-id') || req.header('x-actor-id');
-  if (headerUser) return headerUser.trim();
+export interface ExamSessionRouterOptions {
+  authSecret?: string;
+  lookupUser?: (usernameOrId: string) => Promise<UserAccount | null>;
+}
 
-  const authHeader = req.header('authorization');
-  if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
-    return authHeader.slice(7).trim();
-  }
-
-  const bodyUser =
-    (req.body && (req.body.userId || req.body.actorId || req.body.studentId || req.body.teacherId)) ||
-    req.query.userId;
-  return String(bodyUser || '').trim();
+function sanitizeUserForClient(user: UserAccount): Omit<UserAccount, 'password'> & {
+  password: string;
+} {
+  return {
+    ...user,
+    password: '',
+  };
 }
 
 function extractClientIp(req: Request): string {
@@ -60,70 +64,201 @@ function handleRouteError(res: Response, error: unknown): void {
   });
 }
 
-export function createExamSessionRouter(engine: ExamSessionEngine): Router {
+export function createExamSessionRouter(
+  engine: ExamSessionEngine,
+  options: ExamSessionRouterOptions = {}
+): Router {
   const router = express.Router();
+
+  // ============================================================================
+  // 0. API CÔNG KHAI & XÁC THỰC PHIÊN LÀM VIỆC BẰNG CHỮ KÝ HMAC-SHA256
+  // ============================================================================
+
+  router.get('/public/stats', (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      questionsCount: engine.getQuestionCount(),
+    });
+  });
+
+  // Đăng nhập bằng tài khoản & mật khẩu -> cấp mã phiên HMAC-SHA256 có chữ ký máy chủ
+  router.post('/auth/login', async (req: Request, res: Response) => {
+    try {
+      const username = String(req.body?.username || '').trim();
+      const password = String(req.body?.password || '').trim();
+
+      if (!username || !password) {
+        throw new ExamEngineError(
+          'Vui lòng nhập đầy đủ Mã định danh và Mật khẩu.',
+          400,
+          'INVALID_CREDENTIALS'
+        );
+      }
+
+      let matched = engine.getUser(username);
+      if (!matched && options.lookupUser) {
+        const remoteUser = await options.lookupUser(username);
+        if (remoteUser) {
+          engine.upsertUser(remoteUser);
+          matched = engine.getUser(remoteUser.id) ?? remoteUser;
+        }
+      } else if (matched && matched.password !== password && options.lookupUser) {
+        // Trường hợp mật khẩu vừa được cập nhật trên Firestore chưa kịp về snapshot
+        const freshRemote = await options.lookupUser(username);
+        if (freshRemote) {
+          engine.upsertUser(freshRemote);
+          matched = engine.getUser(freshRemote.id) ?? freshRemote;
+        }
+      }
+
+      if (!matched) {
+        throw new ExamEngineError(
+          `Không tìm thấy tài khoản với mã định danh "${username}".`,
+          401,
+          'INVALID_CREDENTIALS'
+        );
+      }
+
+      if (matched.password !== password) {
+        throw new ExamEngineError(
+          'Mật khẩu không chính xác. Vui lòng kiểm tra lại.',
+          401,
+          'INVALID_CREDENTIALS'
+        );
+      }
+
+      const token = signAuthToken(
+        {
+          sub: matched.id,
+          username: matched.username,
+          role: matched.role,
+          className: matched.className,
+        },
+        { secret: options.authSecret }
+      );
+
+      res.json({
+        ok: true,
+        token,
+        user: sanitizeUserForClient(matched),
+      });
+    } catch (error) {
+      handleRouteError(res, error);
+    }
+  });
+
+  // Kiểm tra mã phiên hiện tại (khi tải lại trang)
+  router.get('/auth/me', async (req: Request, res: Response) => {
+    try {
+      const rawToken = extractRequestAuthToken(req);
+      const verified = verifyAuthToken(rawToken, { secret: options.authSecret });
+      if (!verified) {
+        throw new ExamEngineError(
+          'Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.',
+          401,
+          'UNAUTHORIZED'
+        );
+      }
+
+      let user = engine.getUser(verified.sub);
+      if (!user && options.lookupUser) {
+        const remote = await options.lookupUser(verified.sub);
+        if (remote) {
+          engine.upsertUser(remote);
+          user = remote;
+        }
+      }
+
+      if (!user) {
+        throw new ExamEngineError(
+          'Tài khoản không còn tồn tại trên hệ thống. Vui lòng đăng nhập lại.',
+          401,
+          'UNAUTHORIZED'
+        );
+      }
+
+      res.json({
+        ok: true,
+        user: sanitizeUserForClient(user),
+      });
+    } catch (error) {
+      handleRouteError(res, error);
+    }
+  });
 
   // ============================================================================
   // 1. API GIÁO VIÊN: QUẢN LÝ CA THI (`/api/exam-sessions`)
   // ============================================================================
 
-  function safeDecodeHeader(val: string | undefined): string {
-    if (!val) return '';
-    try {
-      return decodeURIComponent(val).trim();
-    } catch {
-      return val.trim();
+  function requireVerifiedAuth(req: Request) {
+    const rawToken = extractRequestAuthToken(req);
+    const verified = verifyAuthToken(rawToken, { secret: options.authSecret });
+    if (!verified) {
+      throw new ExamEngineError(
+        'Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.',
+        401,
+        'UNAUTHORIZED'
+      );
     }
+    return verified;
   }
 
   function resolveTeacherActor(req: Request): string {
-    const actorId = extractActorId(req);
-    if (!actorId) return '';
-    const existing = engine.getUser(actorId);
-    if (existing) {
-      return existing.id;
+    const verified = requireVerifiedAuth(req);
+    if (verified.role !== 'teacher') {
+      throw new ExamEngineError(
+        'Chỉ tài khoản giáo viên mới có quyền thực hiện thao tác quản lý ca thi.',
+        403,
+        'FORBIDDEN_ROLE'
+      );
     }
-    // Hỗ trợ đồng bộ tài khoản giáo viên đang đăng nhập nếu chưa có trong bộ nhớ máy chủ
-    const roleHeader = req.header('x-user-role');
-    const classHeader = safeDecodeHeader(req.header('x-user-class'));
-    const fullNameHeader = safeDecodeHeader(req.header('x-user-fullname'));
-    const usernameHeader = safeDecodeHeader(req.header('x-user-username'));
-    if (roleHeader === 'teacher' || actorId.toLowerCase().startsWith('gv_')) {
-      const inferredClass =
-        classHeader ||
-        (actorId.toLowerCase() === 'gv_toan'
-          ? '12A1'
-          : actorId.toLowerCase() === 'gv_tin'
-            ? '12A2'
-            : '');
-      engine.upsertUser({
-        id: actorId,
-        username: usernameHeader || actorId,
-        password: '***',
-        fullName: fullNameHeader || `Giáo viên (${actorId})`,
-        role: 'teacher',
-        className: inferredClass,
-        lastLogin: new Date().toISOString(),
-        status: 'online',
-        totalStudyMinutes: 0,
-      });
+    const existing = engine.getUser(verified.sub);
+    if (!existing || existing.role !== 'teacher') {
+      throw new ExamEngineError(
+        'Tài khoản giáo viên chưa được xác thực trên hệ thống hoặc đã bị thu hồi quyền.',
+        403,
+        'FORBIDDEN_ROLE'
+      );
     }
-    return actorId;
+    return existing.id;
   }
 
-  // Đồng bộ danh sách người dùng và câu hỏi từ trình duyệt lên máy chủ
+  // Đồng bộ danh sách người dùng và câu hỏi từ giáo viên lên máy chủ (chỉ tài khoản giáo viên đã xác thực)
   router.post('/exam-sessions/sync-context', (req: Request, res: Response) => {
     try {
+      resolveTeacherActor(req);
       const body = req.body ?? {};
       if (Array.isArray(body.users) && body.users.length > 0) {
         for (const u of body.users) {
           if (u && typeof u.id === 'string' && typeof u.role === 'string') {
-            engine.upsertUser(u);
+            const existing = engine.getUser(u.id);
+            const incomingPassword =
+              typeof u.password === 'string' && u.password && u.password !== '***'
+                ? u.password
+                : existing?.password ?? '';
+            engine.upsertUser({
+              ...u,
+              password: incomingPassword,
+            });
           }
         }
       }
       if (body.currentUser && typeof body.currentUser.id === 'string') {
-        engine.upsertUser(body.currentUser);
+        const existing = engine.getUser(body.currentUser.id);
+        if (existing) {
+          const incomingPassword =
+            typeof body.currentUser.password === 'string' &&
+            body.currentUser.password &&
+            body.currentUser.password !== '***'
+              ? body.currentUser.password
+              : existing.password;
+          engine.upsertUser({
+            ...existing,
+            ...body.currentUser,
+            role: existing.role,
+            password: incomingPassword,
+          });
+        }
       }
       if (Array.isArray(body.questions) && body.questions.length > 0) {
         engine.setQuestions(body.questions);
@@ -152,6 +287,52 @@ export function createExamSessionRouter(engine: ExamSessionEngine): Router {
       const input: CreateExamSessionInput = req.body ?? {};
       const session = engine.createSession(actorId, input);
       res.status(201).json({ ok: true, session });
+    } catch (error) {
+      handleRouteError(res, error);
+    }
+  });
+
+  // Luồng giám sát thời gian thực (Server-Sent Events) cho giáo viên theo dõi ca thi
+  router.get('/exam-sessions/:sessionId/stream', (req: Request, res: Response) => {
+    try {
+      const actorId = resolveTeacherActor(req);
+      const sessionId = req.params.sessionId;
+      const initialDetail = engine.getTeacherSessionDetail(actorId, sessionId);
+
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+
+      const writeSse = (eventName: string, data: unknown) => {
+        if (res.writableEnded || res.destroyed) return;
+        res.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      writeSse('snapshot', { ok: true, ...initialDetail });
+
+      const unsubscribe = engine.subscribeToSessionEvents(sessionId, (event) => {
+        try {
+          const detail = engine.getTeacherSessionDetail(actorId, sessionId);
+          writeSse('update', { event, detail });
+        } catch {
+          // Nếu ca thi đã bị xóa hoặc giáo viên mất quyền, đóng luồng nhẹ nhàng
+          if (!res.writableEnded) {
+            res.end();
+          }
+        }
+      });
+
+      const heartbeatTimer = setInterval(() => {
+        if (res.writableEnded || res.destroyed) return;
+        res.write(`: heartbeat ${Date.now()}\n\n`);
+      }, 20000);
+
+      req.on('close', () => {
+        clearInterval(heartbeatTimer);
+        unsubscribe();
+      });
     } catch (error) {
       handleRouteError(res, error);
     }
@@ -324,46 +505,16 @@ export function createExamSessionRouter(engine: ExamSessionEngine): Router {
   // ============================================================================
 
   function resolveStudentActor(req: Request): string {
-    const actorId = extractActorId(req);
-    if (!actorId) return '';
-    const existing = engine.getUser(actorId);
-    if (existing) {
-      // Nếu client truyền className mới nhất của học sinh đang đăng nhập thì đồng bộ
-      if (
-        existing.role === 'student' &&
-        req.body?.studentProfile &&
-        typeof req.body.studentProfile.className === 'string' &&
-        req.body.studentProfile.className.trim()
-      ) {
-        engine.upsertUser({
-          ...existing,
-          className: req.body.studentProfile.className.trim(),
-        });
-      }
-      return existing.id;
+    const verified = requireVerifiedAuth(req);
+    const existing = engine.getUser(verified.sub);
+    if (!existing) {
+      throw new ExamEngineError(
+        'Tài khoản học sinh chưa được xác thực trên hệ thống. Vui lòng đăng nhập lại.',
+        401,
+        'UNAUTHORIZED'
+      );
     }
-
-    // Tự động đăng ký tài khoản học sinh đang đăng nhập trên trình duyệt nếu chưa kịp đồng bộ
-    const profile = req.body?.studentProfile;
-    if (profile && typeof profile === 'object') {
-      const id = String(profile.id || profile.username || actorId).trim();
-      if (id) {
-        engine.upsertUser({
-          id,
-          username: String(profile.username || id).trim(),
-          password: '***',
-          fullName: String(profile.fullName || id).trim(),
-          role: 'student',
-          className: String(profile.className || 'Lớp Certiport GenAI').trim(),
-          lastLogin: new Date().toISOString(),
-          status: 'studying',
-          totalStudyMinutes: 0,
-        });
-        return id;
-      }
-    }
-
-    return actorId;
+    return existing.id;
   }
 
   // Xác thực mã 6 ký tự (có giới hạn 5 lần sai -> khóa 60 giây theo tài khoản & IP)
@@ -412,7 +563,7 @@ export function createExamSessionRouter(engine: ExamSessionEngine): Router {
   // Lấy đề của lượt thi (TUYỆT ĐỐI KHÔNG kèm đáp án đúng hay giải thích)
   router.get('/attempts/:attemptId/paper', (req: Request, res: Response) => {
     try {
-      const actorId = extractActorId(req);
+      const actorId = resolveStudentActor(req);
       const sessionToken = extractSessionToken(req);
       const paper = engine.getAttemptPaper(
         actorId,
@@ -428,7 +579,7 @@ export function createExamSessionRouter(engine: ExamSessionEngine): Router {
   // Lưu đáp án từng câu trong lúc làm bài
   router.post('/attempts/:attemptId/answers', (req: Request, res: Response) => {
     try {
-      const actorId = extractActorId(req);
+      const actorId = resolveStudentActor(req);
       const sessionToken = extractSessionToken(req);
       const answerRecord = engine.saveAttemptAnswer(actorId, req.params.attemptId, {
         questionId: String(req.body?.questionId || ''),
@@ -467,6 +618,28 @@ export function createExamSessionRouter(engine: ExamSessionEngine): Router {
       handleRouteError(res, error);
     }
   });
+
+  // Cập nhật chính xác thời lượng rời màn hình khi học sinh quay lại phòng thi
+  router.patch(
+    '/attempts/:attemptId/violations/:violationId',
+    (req: Request, res: Response) => {
+      try {
+        const actorId = resolveStudentActor(req);
+        const sessionToken = extractSessionToken(req);
+        const awaySeconds = Number(req.body?.awaySeconds ?? 0);
+        const violation = engine.updateViolationAwayDuration(
+          actorId,
+          req.params.attemptId,
+          req.params.violationId,
+          awaySeconds,
+          sessionToken
+        );
+        res.json({ ok: true, violation });
+      } catch (error) {
+        handleRouteError(res, error);
+      }
+    }
+  );
 
   // Học sinh nộp bài
   router.post('/attempts/:attemptId/submit', (req: Request, res: Response) => {

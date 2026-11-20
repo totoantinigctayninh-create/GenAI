@@ -53,6 +53,7 @@ import {
   toClientRenderableQuestion,
 } from '../utils/liveExamHelpers';
 import { QuestionFontScale, QuestionRenderer } from './QuestionRenderer';
+import { MobileQuestionNavBar } from './MobileQuestionNavBar';
 
 interface LiveExamTabProps {
   currentUser: UserAccount;
@@ -344,6 +345,8 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
   const blockedNoticeTimerRef = useRef<number | null>(null);
   const awaySessionActiveRef = useRef<boolean>(false);
   const awayStartedAtMsRef = useRef<number | null>(null);
+  const activeAwayViolationIdRef = useRef<string | null>(null);
+  const pendingAwayDurationSecondsRef = useRef<number | null>(null);
   const lastScreenLeaveTriggerMsRef = useRef<number>(0);
   const baselineViewportRef = useRef<{ width: number; height: number }>({
     width: typeof window !== 'undefined' ? window.innerWidth : 1280,
@@ -549,6 +552,33 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
 
           queuedViolationsRef.current.shift();
           persistBackupToLocal();
+
+          // Ghi nhớ ID sự kiện rời màn hình gần nhất để cập nhật chính xác số giây rời đi khi học sinh quay lại
+          if (
+            res.violation?.id &&
+            (item.type === 'tab_switch' ||
+              item.type === 'window_blur' ||
+              item.type === 'fullscreen_exit')
+          ) {
+            if (pendingAwayDurationSecondsRef.current !== null) {
+              const elapsed = pendingAwayDurationSecondsRef.current;
+              pendingAwayDurationSecondsRef.current = null;
+              activeAwayViolationIdRef.current = null;
+              if (elapsed > 1) {
+                void examSessionApi
+                  .updateViolationAwayDuration(
+                    currentUser.id,
+                    paper.attempt.id,
+                    res.violation.id,
+                    paper.sessionToken,
+                    elapsed
+                  )
+                  .catch(() => {});
+              }
+            } else {
+              activeAwayViolationIdRef.current = res.violation.id;
+            }
+          }
 
           // Đồng bộ số lần vi phạm từ máy chủ
           if (typeof res.violationCount === 'number') {
@@ -1178,6 +1208,33 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
       }
     };
 
+    const finalizeReturnFromAway = () => {
+      if (!awaySessionActiveRef.current) return;
+      awaySessionActiveRef.current = false;
+      const startedAt = awayStartedAtMsRef.current;
+      awayStartedAtMsRef.current = null;
+      if (!startedAt) return;
+      const elapsedSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      const paper = activePaperRef.current;
+      if (!paper || isFinalizingSubmitRef.current || elapsedSec <= 1) return;
+
+      const knownViolId = activeAwayViolationIdRef.current;
+      if (knownViolId) {
+        activeAwayViolationIdRef.current = null;
+        void examSessionApi
+          .updateViolationAwayDuration(
+            currentUser.id,
+            paper.attempt.id,
+            knownViolId,
+            paper.sessionToken,
+            elapsedSec
+          )
+          .catch(() => {});
+      } else {
+        pendingAwayDurationSecondsRef.current = elapsedSec;
+      }
+    };
+
     // 6. Phát hiện đổi tab, Alt+Tab, chuyển cửa sổ (visibilitychange & window blur)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
@@ -1188,6 +1245,8 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
         ) {
           awaySessionActiveRef.current = true;
           awayStartedAtMsRef.current = now;
+          activeAwayViolationIdRef.current = null;
+          pendingAwayDurationSecondsRef.current = null;
           lastScreenLeaveTriggerMsRef.current = now;
           triggerScreenLeavingViolation('tab_switch', {
             awaySeconds: 1,
@@ -1196,7 +1255,7 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
           });
         }
       } else if (document.visibilityState === 'visible') {
-        awaySessionActiveRef.current = false;
+        finalizeReturnFromAway();
       }
     };
 
@@ -1208,6 +1267,8 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
       ) {
         awaySessionActiveRef.current = true;
         awayStartedAtMsRef.current = now;
+        activeAwayViolationIdRef.current = null;
+        pendingAwayDurationSecondsRef.current = null;
         lastScreenLeaveTriggerMsRef.current = now;
         triggerScreenLeavingViolation('window_blur', {
           awaySeconds: 1,
@@ -1218,7 +1279,7 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
     };
 
     const handleWindowFocus = () => {
-      awaySessionActiveRef.current = false;
+      finalizeReturnFromAway();
     };
 
     // 7. Phát hiện thoát toàn màn hình (F11, giữ Esc, cử chỉ hệ thống - fullscreenchange)
@@ -1258,7 +1319,7 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
       const curH = window.innerHeight;
 
       if (
-        isSuspiciousSplitScreenResize(base.width, base.height, curW, curH) &&
+        isSuspiciousSplitScreenResize(curW, curH, base.width, base.height) &&
         now - lastResizeViolationMsRef.current > 3000
       ) {
         lastResizeViolationMsRef.current = now;
@@ -1855,70 +1916,72 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
         data-reentry-count={activePaper.attempt.reentryCount}
         data-violation-count={violationCount}
         data-max-violations={maxViolations}
-        className="max-w-7xl mx-auto space-y-3 pb-8 select-none"
+        className="max-w-7xl mx-auto space-y-3 pb-24 lg:pb-8 select-none"
       >
         {/* Thanh trên: tên ca thi, đồng hồ đếm ngược (đỏ khi còn dưới 5 phút), nút "Nộp bài" */}
         <header
           data-testid="live-exam-top-bar"
-          className="sticky top-1.5 z-20 rounded-xl bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] px-4 py-3 shadow-xs flex flex-wrap items-center justify-between gap-3"
+          className="sticky top-0 md:top-1.5 z-30 pt-[env(safe-area-inset-top)] md:pt-0 rounded-b-xl md:rounded-xl bg-[var(--color-bg-surface)]/95 backdrop-blur-xs border border-[var(--color-border-subtle)] shadow-xs"
         >
-          <div className="flex flex-wrap items-center gap-3 min-w-0">
-            <h1
-              data-testid="live-exam-room-title"
-              className="text-base sm:text-lg font-bold text-[var(--color-text-primary)] truncate"
-            >
-              {activePaper.attempt.sessionTitle}
-            </h1>
-            <span className="text-sm font-medium text-[var(--color-text-secondary)] tabular-nums">
-              Câu {currentIndex + 1}/{renderableQuestions.length}
-            </span>
-            {activePaper.attempt.reentryCount > 0 && (
-              <span
-                data-testid="live-exam-reentry-badge"
-                className="text-xs font-medium text-[var(--color-text-muted)] tabular-nums"
+          <div className="px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0">
+              <h1
+                data-testid="live-exam-room-title"
+                className="text-sm sm:text-lg font-bold text-[var(--color-text-primary)] truncate max-w-[150px] sm:max-w-xs md:max-w-md"
               >
-                Vào lại: {activePaper.attempt.reentryCount}
+                {activePaper.attempt.sessionTitle}
+              </h1>
+              <span className="text-xs sm:text-sm font-semibold text-[var(--color-text-secondary)] tabular-nums whitespace-nowrap">
+                Câu {currentIndex + 1}/{renderableQuestions.length}
               </span>
-            )}
-            {violationCount > 0 && (
-              <span
-                data-testid="live-exam-violation-counter"
-                data-last-warning={isLastWarningCount ? 'true' : 'false'}
-                className={`text-xs font-semibold px-2.5 py-0.5 rounded-full tabular-nums ${
-                  isLastWarningCount
-                    ? 'bg-red-100 text-red-700 border border-red-300'
-                    : 'bg-amber-50 text-amber-800 border border-amber-200'
-                }`}
-              >
-                Rời bài thi: {violationCount}/{maxViolations}
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div
-              data-testid="live-exam-countdown"
-              data-under-five-minutes={isUnderFiveMinutes ? 'true' : 'false'}
-              className={`h-10 px-3.5 rounded-lg font-mono text-sm sm:text-base font-bold tabular-nums inline-flex items-center gap-2 transition-colors ${
-                isUnderFiveMinutes
-                  ? 'bg-red-600 text-white ring-2 ring-red-200'
-                  : 'bg-slate-900 text-white dark:bg-slate-800'
-              }`}
-            >
-              <Clock className="w-4 h-4 shrink-0" />
-              <span>{formatCountdownClock(remainingSeconds)}</span>
+              {activePaper.attempt.reentryCount > 0 && (
+                <span
+                  data-testid="live-exam-reentry-badge"
+                  className="hidden sm:inline text-xs font-medium text-[var(--color-text-muted)] tabular-nums"
+                >
+                  Vào lại: {activePaper.attempt.reentryCount}
+                </span>
+              )}
+              {violationCount > 0 && (
+                <span
+                  data-testid="live-exam-violation-counter"
+                  data-last-warning={isLastWarningCount ? 'true' : 'false'}
+                  className={`text-[11px] sm:text-xs font-semibold px-2 sm:px-2.5 py-0.5 rounded-full tabular-nums whitespace-nowrap ${
+                    isLastWarningCount
+                      ? 'bg-red-100 text-red-700 border border-red-300'
+                      : 'bg-amber-50 text-amber-800 border border-amber-200'
+                  }`}
+                >
+                  Vi phạm: {violationCount}/{maxViolations}
+                </span>
+              )}
             </div>
 
-            <button
-              type="button"
-              data-testid="live-exam-submit-btn"
-              disabled={isSubmittingExam}
-              onClick={openSubmitDialog}
-              className="h-10 px-4 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-[15px] font-semibold transition-colors inline-flex items-center gap-2 cursor-pointer"
-            >
-              <Send className="w-4 h-4" />
-              <span>Nộp bài</span>
-            </button>
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              <div
+                data-testid="live-exam-countdown"
+                data-under-five-minutes={isUnderFiveMinutes ? 'true' : 'false'}
+                className={`h-9 sm:h-10 px-2.5 sm:px-3.5 rounded-lg font-mono text-xs sm:text-base font-bold tabular-nums inline-flex items-center gap-1.5 sm:gap-2 transition-colors ${
+                  isUnderFiveMinutes
+                    ? 'bg-red-600 text-white ring-2 ring-red-200'
+                    : 'bg-slate-900 text-white dark:bg-slate-800'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span>{formatCountdownClock(remainingSeconds)}</span>
+              </div>
+
+              <button
+                type="button"
+                data-testid="live-exam-submit-btn"
+                disabled={isSubmittingExam}
+                onClick={openSubmitDialog}
+                className="h-9 sm:h-10 px-3 sm:px-4 rounded-lg bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-xs sm:text-[15px] font-semibold transition-colors inline-flex items-center gap-1.5 sm:gap-2 cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span>Nộp bài</span>
+              </button>
+            </div>
           </div>
         </header>
 
@@ -1989,7 +2052,7 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
 
                 {/* Thanh chuyển câu & gắn cờ */}
                 <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="hidden lg:flex items-center gap-2">
                     <button
                       type="button"
                       data-testid="live-exam-prev-btn"
@@ -2045,10 +2108,10 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
             )}
           </div>
 
-          {/* Lưới số câu (đánh dấu câu đã làm, câu đang chọn, câu gắn cờ) */}
+          {/* Lưới số câu (Desktop lg+) */}
           <aside
             data-testid="live-exam-question-grid"
-            className="w-full lg:w-64 shrink-0 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl p-4 space-y-3 lg:sticky lg:top-16"
+            className="hidden lg:block w-full lg:w-64 shrink-0 bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl p-4 space-y-3 lg:sticky lg:top-16"
           >
             <div className="flex items-center justify-between text-sm">
               <h2 className="font-semibold text-[var(--color-text-primary)]">
@@ -2117,6 +2180,78 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
             </div>
           </aside>
         </div>
+
+        {/* Thanh điều hướng cố định đáy màn hình & Ngăn kéo lưới câu hỏi cho Mobile/Tablet (< lg) */}
+        <MobileQuestionNavBar
+          testIdPrefix="live-exam"
+          currentIndex={currentIndex}
+          totalQuestions={renderableQuestions.length}
+          summaryText={`Đã làm ${questionGridStats.answeredCount}/${renderableQuestions.length}`}
+          flaggedCount={questionGridStats.flaggedCount}
+          sheetTitle={`Lưới số câu (${renderableQuestions.length} câu)`}
+          legendItems={[
+            {
+              key: 'answered',
+              label: `Đã làm (${questionGridStats.answeredCount})`,
+              swatchClassName: 'bg-teal-700',
+            },
+            {
+              key: 'current',
+              label: 'Đang chọn',
+              swatchClassName: 'bg-white border-2 border-teal-700',
+            },
+            {
+              key: 'flagged',
+              label: `Gắn cờ (${questionGridStats.flaggedCount})`,
+              isFlag: true,
+            },
+          ]}
+          items={renderableQuestions.map((q, idx) => {
+            const isCurrent = idx === currentIndex;
+            const answered = isQuestionAnswered(q, userAnswers[q.id]);
+            const flagged = Boolean(flaggedMap[q.id]);
+
+            let cellClassName =
+              'bg-slate-50 border-slate-200 text-slate-700 hover:border-teal-600';
+            if (answered) {
+              cellClassName = 'bg-teal-700 border-teal-700 text-white font-bold';
+            }
+            if (flagged && !answered) {
+              cellClassName =
+                'bg-amber-50 border-amber-400 text-amber-900 font-bold';
+            }
+            if (isCurrent) {
+              cellClassName += ' ring-2 ring-teal-700 ring-offset-1 font-extrabold';
+            }
+
+            return {
+              id: q.id,
+              index: idx,
+              label: String(idx + 1),
+              ariaLabel: `Câu ${idx + 1}${
+                answered ? ', đã làm' : ', chưa làm'
+              }${flagged ? ', đã gắn cờ' : ''}`,
+              cellClassName,
+              isCurrent,
+              isFlagged: flagged,
+              dataAnswered: answered,
+            };
+          })}
+          onPrev={() => handleSelectQuestionIndex(currentIndex - 1)}
+          onNext={() => handleSelectQuestionIndex(currentIndex + 1)}
+          onSelectIndex={(idx) => handleSelectQuestionIndex(idx)}
+          footerAction={
+            <button
+              type="button"
+              disabled={isSubmittingExam}
+              onClick={openSubmitDialog}
+              className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-sm font-bold transition-colors inline-flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Send className="w-4 h-4" />
+              <span>Nộp bài</span>
+            </button>
+          }
+        />
 
         {/* LỚP PHỦ B.2: Thoát toàn màn hình bằng F11 / giữ Esc / cử chỉ hệ thống (che bài thi ngay lập tức) */}
         {fullscreenExitOverlayOpen && (
@@ -2231,14 +2366,14 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
             aria-modal="true"
             aria-labelledby="live-exam-submit-dialog-title"
             data-testid="live-exam-submit-modal"
-            className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-[1px] flex items-end sm:items-center justify-center p-3 sm:p-4"
           >
-            <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-xl max-w-md w-full p-6 shadow-xl space-y-5">
+            <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-2xl max-w-md w-full max-h-[88dvh] overflow-y-auto overscroll-contain p-5 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-xl space-y-5">
               <div className="space-y-1.5">
                 <h3
                   id="live-exam-submit-dialog-title"
                   data-testid="live-exam-submit-dialog-title"
-                  className="text-xl font-bold text-[var(--color-text-primary)]"
+                  className="text-lg sm:text-xl font-bold text-[var(--color-text-primary)]"
                 >
                   Nộp bài và thoát?
                 </h3>
@@ -2253,13 +2388,13 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5 pt-1">
                 <button
                   ref={cancelSubmitBtnRef}
                   type="button"
                   data-testid="cancel-submit-live-exam-btn"
                   onClick={closeSubmitDialog}
-                  className="h-10 px-4 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-sm font-semibold transition-colors cursor-pointer"
+                  className="min-h-[44px] w-full sm:w-auto px-4 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-sm font-semibold transition-colors cursor-pointer"
                 >
                   Tiếp tục làm bài
                 </button>
@@ -2271,7 +2406,7 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
                   data-armed={isSubmitArmed ? 'true' : 'false'}
                   disabled={isSubmittingExam}
                   onClick={handleDialogSubmitButtonClick}
-                  className={`h-10 px-4 rounded-lg border text-sm font-semibold transition-colors cursor-pointer disabled:opacity-60 ${
+                  className={`min-h-[44px] w-full sm:w-auto px-4 rounded-xl border text-sm font-semibold transition-colors cursor-pointer disabled:opacity-60 ${
                     isSubmitArmed
                       ? 'bg-rose-600 hover:bg-rose-700 border-rose-600 text-white'
                       : 'bg-white hover:bg-rose-50 border-rose-600 text-rose-700'

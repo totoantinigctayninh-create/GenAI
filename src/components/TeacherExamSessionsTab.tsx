@@ -1,20 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
+  Activity,
+  BarChart3,
   Check,
   ChevronDown,
   ChevronUp,
   Copy,
+  Edit3,
   Lock,
   Maximize2,
   MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
+  Share2,
   StopCircle,
   Trash2,
   Unlock,
   X,
   AlertTriangle,
+  Zap,
 } from 'lucide-react';
 import { Question, UserAccount } from '../types/exam';
 import {
@@ -28,6 +34,15 @@ import {
   CreateExamSessionFormErrors,
   validateCreateExamSessionForm,
 } from '../utils/liveExamHelpers';
+import {
+  buildSessionShareMessage,
+  computeExamSessionsOverviewStats,
+  EXAM_SESSION_PRESETS,
+  ExamSessionPreset,
+  ExamSessionSortMode,
+  filterAndSortExamSessions,
+  toDatetimeLocalValue,
+} from '../utils/examSessionQuickHelpers';
 import { TeacherSessionDetailView } from './TeacherSessionDetailView';
 
 interface TeacherExamSessionsTabProps {
@@ -64,16 +79,25 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
   // Trang chi tiết ca thi (BƯỚC 6/8: Tab "Đang thi" & "Kết quả")
   const [selectedSessionForDetail, setSelectedSessionForDetail] =
     useState<ExamSessionRecord | null>(null);
+  const [detailInitialTab, setDetailInitialTab] = useState<'live' | 'results'>('live');
 
-  // Bộ lọc danh sách ca thi
+  // Bộ lọc & sắp xếp danh sách ca thi
   const [statusFilter, setStatusFilter] = useState<'ALL' | ExamSessionStatus>('ALL');
+  const [classFilter, setClassFilter] = useState<string>('ALL');
+  const [sortBy, setSortBy] = useState<ExamSessionSortMode>('newest');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Sao chép mã nhanh trên từng dòng
+  // Sao chép mã & tin nhắn nhanh
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
+  const [copiedShareId, setCopiedShareId] = useState<string | null>(null);
 
-  // Menu hành động "⋯" trên từng dòng
+  // Menu hành động "⋯" trên từng dòng (render qua Portal để không bị cắt trong bảng)
   const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null);
+  const [openMenuAnchor, setOpenMenuAnchor] = useState<{
+    top: number;
+    left: number;
+    placement: 'bottom' | 'top';
+  } | null>(null);
   const [busySessionId, setBusySessionId] = useState<string | null>(null);
 
   // Hộp thoại xác nhận Kết thúc ca thi
@@ -88,13 +112,15 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
   const [projectedSession, setProjectedSession] =
     useState<ExamSessionRecord | null>(null);
 
-  // Drawer Tạo ca thi bên phải
+  // Drawer Tạo / Chỉnh sửa ca thi bên phải
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+  const [editingSession, setEditingSession] =
+    useState<ExamSessionRecord | null>(null);
   const [createdSessionInDrawer, setCreatedSessionInDrawer] =
     useState<ExamSessionRecord | null>(null);
   const [isSubmittingCreate, setIsSubmittingCreate] = useState<boolean>(false);
 
-  // Trường dữ liệu trong Drawer Tạo ca thi
+  // Trường dữ liệu trong Drawer Tạo / Sửa ca thi
   const [title, setTitle] = useState<string>('');
   const [targetClassMode, setTargetClassMode] = useState<'ALL' | 'CUSTOM'>('ALL');
   const [customClassName, setCustomClassName] = useState<string>(
@@ -199,17 +225,32 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [projectedSession, openMenuSessionId]);
 
-  // Đóng menu "⋯" khi bấm ra ngoài
+  // Đóng menu "⋯" khi bấm ra ngoài hoặc cuộn/thay đổi kích thước trang
   useEffect(() => {
     if (!openMenuSessionId) return;
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && !target.closest('[data-row-menu]')) {
         setOpenMenuSessionId(null);
+        setOpenMenuAnchor(null);
       }
     };
+    const handleViewportChange = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (target && typeof target.closest === 'function' && target.closest('[data-row-menu]')) {
+        return;
+      }
+      setOpenMenuSessionId(null);
+      setOpenMenuAnchor(null);
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('scroll', handleViewportChange, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('scroll', handleViewportChange, true);
+    };
   }, [openMenuSessionId]);
 
   const handleCopyCode = async (code: string, sessionId: string) => {
@@ -226,7 +267,27 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
     }
   };
 
+  const handleCopyShareMessage = async (session: ExamSessionRecord) => {
+    try {
+      const msg = buildSessionShareMessage(session);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(msg);
+      }
+      setCopiedShareId(session.id);
+      setBannerMessage({
+        type: 'success',
+        text: `Đã sao chép thông báo kèm mã ${session.code} cho ca thi "${session.title}". Bạn có thể dán trực tiếp vào nhóm lớp Zalo/Classroom.`,
+      });
+      window.setTimeout(() => {
+        setCopiedShareId((prev) => (prev === session.id ? null : prev));
+      }, 2500);
+    } catch {
+      setCopiedShareId(session.id);
+    }
+  };
+
   const resetCreateForm = () => {
+    setEditingSession(null);
     setTitle('');
     setTargetClassMode('ALL');
     setCustomClassName(currentUser.className || availableClasses[0] || '12A1');
@@ -247,14 +308,60 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
     setCreatedSessionInDrawer(null);
   };
 
+  const handleApplyPreset = (preset: ExamSessionPreset) => {
+    const safeQCount = Math.min(
+      preset.questionCount,
+      Math.max(1, questions.length || preset.questionCount)
+    );
+    setSelectionMode('proportional');
+    setQuestionCount(String(safeQCount));
+    setDurationMinutes(String(preset.durationMinutes));
+    setPassScore(String(preset.passScore));
+    setMaxViolations(String(preset.maxViolations));
+    if (!title.trim()) {
+      setTitle(`${preset.label} - Certiport GenAI`);
+    }
+    setFormErrors({});
+  };
+
   const handleOpenCreateDrawer = () => {
     resetCreateForm();
+    setIsDrawerOpen(true);
+  };
+
+  const handleOpenEditDrawer = (session: ExamSessionRecord) => {
+    setOpenMenuSessionId(null);
+    setEditingSession(session);
+    setCreatedSessionInDrawer(null);
+    setTitle(session.title);
+    if (session.targetClass === 'ALL') {
+      setTargetClassMode('ALL');
+      setCustomClassName(currentUser.className || availableClasses[0] || '12A1');
+    } else {
+      setTargetClassMode('CUSTOM');
+      setCustomClassName(session.targetClass);
+    }
+    setQuestionCount(String(session.questionCount));
+    setDurationMinutes(String(session.durationMinutes));
+    setOpenImmediately(session.status === 'open');
+    setSelectionMode(session.selectionMode || 'proportional');
+    setManualQuestionIds(session.manualQuestionIds || []);
+    setManualSearchQuery('');
+    setShuffleQuestionsAndOptions(Boolean(session.shuffleQuestions));
+    setOpenAt(toDatetimeLocalValue(session.openAt));
+    setCloseAt(toDatetimeLocalValue(session.closeAt));
+    setMaxViolations(String(session.maxViolations ?? 3));
+    setPassScore(String(session.passScore ?? 700));
+    setResultVisibility(session.resultVisibility || 'score_only');
+    setIsAdvancedOpen(true);
+    setFormErrors({});
     setIsDrawerOpen(true);
   };
 
   const handleCloseDrawer = () => {
     if (isSubmittingCreate) return;
     setIsDrawerOpen(false);
+    setEditingSession(null);
     setCreatedSessionInDrawer(null);
   };
 
@@ -325,28 +432,67 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
           ? manualQuestionIds.length
           : Number(questionCount);
 
-      const res = await examSessionApi.createSession(teacherId, {
-        title: title.trim(),
-        targetClass: effectiveTargetClass,
-        questionCount: resolvedQuestionCount,
-        durationMinutes: Number(durationMinutes),
-        selectionMode,
-        ...(selectionMode === 'manual' ? { manualQuestionIds } : {}),
-        shuffleQuestions: shuffleQuestionsAndOptions,
-        shuffleOptions: shuffleQuestionsAndOptions,
-        openAt: openAt ? new Date(openAt).toISOString() : null,
-        closeAt: closeAt ? new Date(closeAt).toISOString() : null,
-        maxViolations: Number(maxViolations),
-        passScore: Number(passScore),
-        resultVisibility,
-        status: openImmediately ? 'open' : 'draft',
-      });
+      if (editingSession) {
+        const hasStudents = (editingSession.enteredCount ?? 0) > 0;
+        const res = await examSessionApi.updateSession(
+          teacherId,
+          editingSession.id,
+          {
+            title: title.trim(),
+            targetClass: effectiveTargetClass,
+            durationMinutes: Number(durationMinutes),
+            ...(hasStudents
+              ? {}
+              : {
+                  questionCount: resolvedQuestionCount,
+                  selectionMode,
+                  ...(selectionMode === 'manual' ? { manualQuestionIds } : {}),
+                  shuffleQuestions: shuffleQuestionsAndOptions,
+                  shuffleOptions: shuffleQuestionsAndOptions,
+                }),
+            openAt: openAt ? new Date(openAt).toISOString() : null,
+            closeAt: closeAt ? new Date(closeAt).toISOString() : null,
+            maxViolations: Number(maxViolations),
+            passScore: Number(passScore),
+            resultVisibility,
+          }
+        );
 
-      setCreatedSessionInDrawer(res.session);
-      await loadSessions(true);
+        setIsDrawerOpen(false);
+        setEditingSession(null);
+        setBannerMessage({
+          type: 'success',
+          text: `Đã cập nhật cấu hình ca thi "${res.session.title}" (${res.session.code}).`,
+        });
+        await loadSessions(true);
+      } else {
+        const res = await examSessionApi.createSession(teacherId, {
+          title: title.trim(),
+          targetClass: effectiveTargetClass,
+          questionCount: resolvedQuestionCount,
+          durationMinutes: Number(durationMinutes),
+          selectionMode,
+          ...(selectionMode === 'manual' ? { manualQuestionIds } : {}),
+          shuffleQuestions: shuffleQuestionsAndOptions,
+          shuffleOptions: shuffleQuestionsAndOptions,
+          openAt: openAt ? new Date(openAt).toISOString() : null,
+          closeAt: closeAt ? new Date(closeAt).toISOString() : null,
+          maxViolations: Number(maxViolations),
+          passScore: Number(passScore),
+          resultVisibility,
+          status: openImmediately ? 'open' : 'draft',
+        });
+
+        setCreatedSessionInDrawer(res.session);
+        await loadSessions(true);
+      }
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : 'Không thể tạo ca thi mới.';
+        err instanceof Error
+          ? err.message
+          : editingSession
+            ? 'Không thể cập nhật ca thi.'
+            : 'Không thể tạo ca thi mới.';
       setFormErrors({ title: msg });
     } finally {
       setIsSubmittingCreate(false);
@@ -461,30 +607,49 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
     }
   };
 
-  const filteredSessions = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return sessions.filter((s) => {
-      if (statusFilter !== 'ALL' && s.status !== statusFilter) {
-        return false;
-      }
-      if (!q) return true;
-      return (
-        s.title.toLowerCase().includes(q) ||
-        s.code.toLowerCase().includes(q) ||
-        s.targetClass.toLowerCase().includes(q)
-      );
-    });
-  }, [sessions, statusFilter, searchQuery]);
+  const sessionClasses = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of sessions) {
+      if (s.targetClass) set.add(s.targetClass);
+    }
+    return Array.from(set).sort((a, b) =>
+      a === 'ALL' ? -1 : b === 'ALL' ? 1 : a.localeCompare(b, 'vi')
+    );
+  }, [sessions]);
+
+  const filteredSessions = useMemo(
+    () =>
+      filterAndSortExamSessions(sessions, {
+        statusFilter,
+        classFilter,
+        searchQuery,
+        sortBy,
+      }),
+    [sessions, statusFilter, classFilter, searchQuery, sortBy]
+  );
+
+  const overviewStats = useMemo(
+    () => computeExamSessionsOverviewStats(sessions),
+    [sessions]
+  );
 
   const statusCounts = useMemo(() => {
     return {
-      ALL: sessions.length,
-      draft: sessions.filter((s) => s.status === 'draft').length,
-      open: sessions.filter((s) => s.status === 'open').length,
-      locked: sessions.filter((s) => s.status === 'locked').length,
-      ended: sessions.filter((s) => s.status === 'ended').length,
+      ALL: overviewStats.totalSessions,
+      draft: overviewStats.draftCount,
+      open: overviewStats.openCount,
+      locked: overviewStats.lockedCount,
+      ended: overviewStats.endedCount,
     };
-  }, [sessions]);
+  }, [overviewStats]);
+
+  const openSessionDetail = (
+    session: ExamSessionRecord,
+    tab: 'live' | 'results' = 'live'
+  ) => {
+    setDetailInitialTab(tab);
+    setSelectedSessionForDetail(session);
+  };
 
   if (selectedSessionForDetail) {
     return (
@@ -492,6 +657,7 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
         currentUser={currentUser}
         sessionId={selectedSessionForDetail.id}
         initialSession={selectedSessionForDetail}
+        initialTab={detailInitialTab}
         onBack={() => {
           setSelectedSessionForDetail(null);
           void loadSessions(true);
@@ -560,80 +726,372 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
         </div>
       )}
 
-      {/* Bộ lọc theo trạng thái & Ô tìm kiếm */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        <div
-          className="flex flex-wrap items-center gap-1.5"
-          role="tablist"
-          aria-label="Bộ lọc trạng thái ca thi"
-        >
-          {(
-            [
-              { id: 'ALL', label: 'Tất cả' },
-              { id: 'open', label: 'Đang mở' },
-              { id: 'locked', label: 'Đã khóa' },
-              { id: 'draft', label: 'Nháp' },
-              { id: 'ended', label: 'Đã kết thúc' },
-            ] as const
-          ).map((tab) => {
-            const active = statusFilter === tab.id;
-            const count = statusCounts[tab.id];
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setStatusFilter(tab.id)}
-                data-testid={`filter-status-${tab.id}`}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums ${
-                  active
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                {tab.label} ({count})
-              </button>
-            );
-          })}
+      {/* Dải chỉ số tổng quan nhanh Ca thi */}
+      <div
+        className="bg-white border border-slate-200 rounded-xl grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 sm:divide-x divide-slate-200 tabular-nums"
+        data-testid="sessions-kpi-strip"
+      >
+        <div className="p-4">
+          <div className="text-xs font-medium text-slate-500">Tổng số ca thi</div>
+          <div className="text-2xl font-extrabold text-slate-900 mt-1">
+            {overviewStats.totalSessions}
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            {overviewStats.draftCount} nháp · {overviewStats.endedCount} đã kết thúc
+          </div>
         </div>
-
-        <div className="relative w-full lg:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Tìm theo tên ca thi, mã hoặc lớp..."
-            data-testid="search-sessions-input"
-            className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+        <div className="p-4">
+          <div className="text-xs font-medium text-slate-500">Ca đang mở / khóa mã</div>
+          <div className="text-2xl font-extrabold text-emerald-700 mt-1">
+            {overviewStats.openCount}
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            {overviewStats.lockedCount} ca đang khóa nhận HS mới
+          </div>
+        </div>
+        <div className="p-4">
+          <div className="text-xs font-medium text-slate-500">Học sinh đang làm bài</div>
+          <div className="text-2xl font-extrabold text-teal-700 mt-1">
+            {overviewStats.activeStudentsNow}
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            Cập nhật trực tiếp mỗi 8 giây
+          </div>
+        </div>
+        <div className="p-4">
+          <div className="text-xs font-medium text-slate-500">Tổng bài thi đã thu</div>
+          <div className="text-2xl font-extrabold text-slate-900 mt-1">
+            {overviewStats.totalSubmittedScripts}
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            Trên tổng {overviewStats.totalEnteredStudents} lượt thí sinh vào phòng
+          </div>
         </div>
       </div>
 
-      {/* Bảng gọn danh sách ca thi */}
+      {/* Bộ lọc theo trạng thái, lớp, sắp xếp & Ô tìm kiếm */}
+      <div className="bg-white border border-slate-200 rounded-xl p-2.5 flex flex-col gap-2">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2">
+          <div
+            className="flex flex-wrap xl:flex-nowrap items-center gap-1 shrink-0"
+            role="tablist"
+            aria-label="Bộ lọc trạng thái ca thi"
+          >
+            {(
+              [
+                { id: 'ALL', label: 'Tất cả' },
+                { id: 'open', label: 'Đang mở' },
+                { id: 'locked', label: 'Đã khóa' },
+                { id: 'draft', label: 'Nháp' },
+                { id: 'ended', label: 'Đã kết thúc' },
+              ] as const
+            ).map((tab) => {
+              const active = statusFilter === tab.id;
+              const count = statusCounts[tab.id];
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setStatusFilter(tab.id)}
+                  data-testid={`filter-status-${tab.id}`}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer tabular-nums whitespace-nowrap ${
+                    active
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {tab.label} ({count})
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 min-w-0">
+            {sessionClasses.length > 0 && (
+              <select
+                aria-label="Lọc theo lớp"
+                value={classFilter}
+                onChange={(e) => setClassFilter(e.target.value)}
+                data-testid="filter-sessions-class"
+                className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 max-w-[138px] focus:outline-none focus:ring-2 focus:ring-teal-600"
+              >
+                <option value="ALL">Mọi đối tượng</option>
+                {sessionClasses.map((cls) => (
+                  <option key={cls} value={cls}>
+                    {cls === 'ALL'
+                      ? 'Mọi HS có mã'
+                      : cls.toLowerCase().startsWith('lớp')
+                        ? cls
+                        : `Lớp ${cls}`}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <select
+              aria-label="Sắp xếp ca thi"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as ExamSessionSortMode)}
+              data-testid="sort-sessions-select"
+              className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 max-w-[140px] focus:outline-none focus:ring-2 focus:ring-teal-600"
+            >
+              <option value="newest">Mới tạo nhất</option>
+              <option value="active_students">Đang thi nhiều nhất</option>
+              <option value="title">Tên ca thi (A–Z)</option>
+            </select>
+
+            <div className="relative w-full sm:w-44 shrink-0">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Tìm tên ca, mã..."
+                data-testid="search-sessions-input"
+                className="w-full pl-8 pr-7 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Danh sách ca thi: Thẻ xếp dọc trên điện thoại (< md) + Bảng đầy đủ trên máy tính (md+) */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-visible">
-        <div className="overflow-x-auto">
+        {/* Giao diện thẻ xếp dọc cho điện thoại (< md) */}
+        <div
+          data-testid="mobile-exam-sessions-list"
+          className="md:hidden divide-y divide-slate-200"
+        >
+          {loading && sessions.length === 0 ? (
+            <div className="py-10 px-4 text-center text-xs text-slate-500">
+              Đang tải danh sách ca thi...
+            </div>
+          ) : filteredSessions.length === 0 ? (
+            <div className="py-10 px-4 text-center text-xs text-slate-500">
+              {sessions.length === 0
+                ? 'Chưa có ca thi nào. Bấm "Tạo ca thi" ở góc trên để tạo mã cho học sinh vào thi.'
+                : 'Không tìm thấy ca thi nào khớp với bộ lọc hiện tại.'}
+            </div>
+          ) : (
+            filteredSessions.map((session) => {
+              const enteredCount = session.enteredCount ?? 0;
+              const inProgressCount = session.inProgressCount ?? 0;
+              const totalTarget = session.totalTargetStudents;
+              const isCopied = copiedCodeId === session.id;
+              const isBusy = busySessionId === session.id;
+              const isLocked = session.status === 'locked';
+              const isOpen = session.status === 'open';
+              const isEnded = session.status === 'ended';
+              const isDraft = session.status === 'draft';
+
+              return (
+                <div
+                  key={session.id}
+                  data-testid="mobile-session-card"
+                  className="p-4 space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => openSessionDetail(session, 'live')}
+                        className="font-bold text-slate-900 hover:text-teal-700 text-left text-sm leading-snug cursor-pointer"
+                      >
+                        {session.title}
+                      </button>
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        <span className="font-semibold text-slate-700">
+                          {session.targetClass === 'ALL'
+                            ? 'Mọi HS có mã'
+                            : `Lớp ${session.targetClass}`}
+                        </span>{' '}
+                        · {RESULT_VISIBILITY_LABELS[session.resultVisibility]}
+                      </div>
+                    </div>
+
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold border whitespace-nowrap shrink-0 ${
+                        isOpen
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : isLocked
+                            ? 'bg-amber-50 text-amber-800 border-amber-200'
+                            : isDraft
+                              ? 'bg-slate-100 text-slate-700 border-slate-200'
+                              : 'bg-slate-100 text-slate-500 border-slate-200'
+                      }`}
+                    >
+                      {STATUS_LABELS[session.status]}
+                    </span>
+                  </div>
+
+                  {/* Mã vào thi & Thông số nhanh */}
+                  <div className="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs tabular-nums">
+                    <div>
+                      <div className="text-[11px] text-slate-500 mb-1">Mã vào thi</div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyCode(session.code, session.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-teal-50 font-mono font-bold text-xs tracking-wider text-slate-900 cursor-pointer"
+                        >
+                          <span>{session.code}</span>
+                          {isCopied ? (
+                            <Check className="w-3.5 h-3.5 text-teal-700" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5 text-slate-400" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProjectedSession(session)}
+                          aria-label="Chiếu mã lên màn hình"
+                          className="min-h-[34px] min-w-[34px] inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-teal-700 cursor-pointer"
+                        >
+                          <Maximize2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-[11px] text-slate-500">Thí sinh & Cấu trúc</div>
+                      <div className="font-bold text-slate-900 mt-0.5">
+                        {totalTarget !== null && totalTarget !== undefined
+                          ? `${enteredCount}/${totalTarget} HS`
+                          : `${enteredCount} HS`}{' '}
+                        {inProgressCount > 0 && (
+                          <span className="text-teal-700">({inProgressCount} đang thi)</span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        {session.durationMinutes}p · {session.questionCount} câu · Đạt {session.passScore}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Hàng nút thao tác tối ưu chạm 44px */}
+                  <div className="grid grid-cols-2 gap-2" data-row-menu>
+                    <button
+                      type="button"
+                      onClick={() => openSessionDetail(session, 'live')}
+                      className="min-h-[44px] px-3 py-2 rounded-xl border border-teal-300 bg-teal-50/70 hover:bg-teal-100 text-teal-900 text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Activity className="w-4 h-4 text-teal-700" />
+                      <span>Giám sát</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openSessionDetail(session, 'results')}
+                      className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <BarChart3 className="w-4 h-4 text-slate-600" />
+                      <span>Kết quả</span>
+                    </button>
+
+                    {!isEnded ? (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void handleToggleLockSwitch(session)}
+                        className={`min-h-[44px] px-3 py-2 rounded-xl border text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                          isDraft
+                            ? 'border-teal-600 bg-white text-teal-800 hover:bg-teal-50'
+                            : isLocked
+                              ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
+                              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {isDraft ? (
+                          <>
+                            <Unlock className="w-4 h-4" />
+                            <span>Mở ca thi</span>
+                          </>
+                        ) : isLocked ? (
+                          <>
+                            <Unlock className="w-4 h-4" />
+                            <span>Mở khóa ca thi</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-4 h-4" />
+                            <span>Khóa ca thi</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void handleCloneSession(session)}
+                        className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Copy className="w-4 h-4" />
+                        <span>Tạo bản sao</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        if (openMenuSessionId === session.id) {
+                          setOpenMenuSessionId(null);
+                          setOpenMenuAnchor(null);
+                          return;
+                        }
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const menuWidth = 224;
+                        const estimatedHeight = 250;
+                        const spaceBelow = window.innerHeight - rect.bottom;
+                        const openUpward =
+                          spaceBelow < estimatedHeight && rect.top > estimatedHeight;
+                        const left = Math.min(
+                          window.innerWidth - menuWidth - 12,
+                          Math.max(12, rect.right - menuWidth)
+                        );
+                        setOpenMenuAnchor({
+                          top: openUpward ? Math.max(12, rect.top - 6) : rect.bottom + 6,
+                          left,
+                          placement: openUpward ? 'top' : 'bottom',
+                        });
+                        setOpenMenuSessionId(session.id);
+                      }}
+                      className="min-h-[44px] px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                      aria-label="Menu hành động ca thi"
+                      aria-expanded={openMenuSessionId === session.id}
+                    >
+                      <MoreHorizontal className="w-4 h-4" />
+                      <span>Tùy chọn khác</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Giao diện bảng đầy đủ trên máy tính (md+) */}
+        <div className="hidden md:block overflow-x-auto">
           <table
             className="w-full text-left border-collapse"
             data-testid="exam-sessions-table"
           >
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80 text-xs font-bold text-slate-600 whitespace-nowrap">
-                <th className="py-3.5 px-4">Tên ca thi</th>
-                <th className="py-3.5 px-4">Mã vào thi</th>
-                <th className="py-3.5 px-4">Trạng thái</th>
-                <th className="py-3.5 px-4">HS đã vào / Tổng</th>
-                <th className="py-3.5 px-4">Thời gian</th>
-                <th className="py-3.5 px-4">Khóa / Mở khóa</th>
-                <th className="py-3.5 px-4 text-right">Hành động</th>
+                <th className="py-3 px-3">Tên ca thi</th>
+                <th className="py-3 px-2.5">Mã vào thi</th>
+                <th className="py-3 px-2.5">Trạng thái</th>
+                <th className="py-3 px-2.5">Thí sinh</th>
+                <th className="py-3 px-2.5">Cấu trúc</th>
+                <th className="py-3 px-2.5">Khóa mã</th>
+                <th className="py-3 px-3 text-right">Hành động</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 text-sm">
@@ -677,35 +1135,29 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                       className="hover:bg-slate-50/70 transition-colors"
                     >
                       {/* 1. Tên ca thi & Lớp (Bấm vào tên để mở trang chi tiết ca thi) */}
-                      <td className="py-3.5 px-4 align-middle">
+                      <td className="py-3 px-3 align-middle max-w-[230px]">
                         <button
                           type="button"
-                          onClick={() => setSelectedSessionForDetail(session)}
+                          onClick={() => openSessionDetail(session, 'live')}
                           data-testid={`open-session-detail-btn-${session.code}`}
-                          className="font-bold text-slate-900 hover:text-teal-700 text-left transition-colors cursor-pointer"
+                          title={session.title}
+                          className="font-bold text-slate-900 hover:text-teal-700 text-left transition-colors cursor-pointer line-clamp-1"
                         >
                           {session.title}
                         </button>
-                        <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                          <span className="whitespace-nowrap">
-                            Đối tượng:{' '}
-                            <strong className="text-slate-700 font-semibold">
-                              {session.targetClass === 'ALL'
-                                ? 'Mọi học sinh có mã'
-                                : `Lớp ${session.targetClass}`}
-                            </strong>
-                          </span>
-                          <span className="text-slate-300">|</span>
-                          <span className="whitespace-nowrap">
-                            Kết quả:{' '}
-                            {RESULT_VISIBILITY_LABELS[session.resultVisibility]}
-                          </span>
+                        <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                          <span className="font-semibold text-slate-700">
+                            {session.targetClass === 'ALL'
+                              ? 'Mọi HS có mã'
+                              : `Lớp ${session.targetClass}`}
+                          </span>{' '}
+                          · {RESULT_VISIBILITY_LABELS[session.resultVisibility]}
                         </div>
                       </td>
 
                       {/* 2. Mã 6 ký tự (bấm để sao chép + nút Chiếu mã) */}
-                      <td className="py-3.5 px-4 align-middle whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
+                      <td className="py-3 px-2.5 align-middle whitespace-nowrap">
+                        <div className="flex items-center gap-1">
                           <button
                             type="button"
                             onClick={() =>
@@ -713,13 +1165,13 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                             }
                             data-testid={`copy-code-btn-${session.code}`}
                             title="Bấm để sao chép mã ca thi"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-slate-300 bg-slate-50 hover:bg-teal-50 hover:border-teal-300 font-mono font-bold text-sm tracking-wider text-slate-900 transition-colors cursor-pointer tabular-nums"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-300 bg-slate-50 hover:bg-teal-50 hover:border-teal-300 font-mono font-bold text-xs tracking-wider text-slate-900 transition-colors cursor-pointer tabular-nums"
                           >
                             <span>{session.code}</span>
                             {isCopied ? (
-                              <Check className="w-3.5 h-3.5 text-teal-700" />
+                              <Check className="w-3 h-3 text-teal-700" />
                             ) : (
-                              <Copy className="w-3.5 h-3.5 text-slate-400" />
+                              <Copy className="w-3 h-3 text-slate-400" />
                             )}
                           </button>
 
@@ -730,21 +1182,21 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                             title="Chiếu mã chữ lớn lên màn hình"
                             className="p-1.5 rounded-md border border-slate-200 text-slate-600 hover:text-teal-700 hover:border-teal-300 hover:bg-teal-50 transition-colors cursor-pointer"
                           >
-                            <Maximize2 className="w-3.5 h-3.5" />
+                            <Maximize2 className="w-3 h-3" />
                           </button>
                         </div>
                         {isCopied && (
-                          <div className="text-[11px] font-semibold text-teal-700 mt-1">
-                            Đã sao chép mã
+                          <div className="text-[10px] font-semibold text-teal-700 mt-0.5">
+                            Đã sao chép
                           </div>
                         )}
                       </td>
 
                       {/* 3. Trạng thái */}
-                      <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                      <td className="py-3 px-2.5 align-middle whitespace-nowrap">
                         <span
                           data-testid={`session-status-${session.code}`}
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold border whitespace-nowrap ${
+                          className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold border whitespace-nowrap ${
                             isOpen
                               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                               : isLocked
@@ -754,57 +1206,48 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                                   : 'bg-slate-100 text-slate-500 border-slate-200'
                           }`}
                         >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                              isOpen
-                                ? 'bg-emerald-600'
-                                : isLocked
-                                  ? 'bg-amber-600'
-                                  : 'bg-slate-400'
-                            }`}
-                          />
                           {STATUS_LABELS[session.status]}
                         </span>
                       </td>
 
                       {/* 4. Số học sinh đã vào / Tổng */}
-                      <td className="py-3.5 px-4 align-middle tabular-nums whitespace-nowrap">
+                      <td className="py-3 px-2.5 align-middle tabular-nums whitespace-nowrap">
                         <div
-                          className="font-bold text-slate-900"
+                          className="font-bold text-xs text-slate-900"
                           data-testid={`session-participants-${session.code}`}
                         >
                           {totalTarget !== null && totalTarget !== undefined
                             ? `${enteredCount}/${totalTarget}`
-                            : `${enteredCount} / Mọi HS`}
+                            : `${enteredCount} HS`}
                         </div>
-                        <div className="text-xs text-slate-500">
+                        <div className="text-[11px] text-slate-500">
                           {inProgressCount > 0 ? (
                             <span className="text-teal-700 font-semibold">
-                              {inProgressCount} đang làm bài
+                              {inProgressCount} đang thi
                             </span>
                           ) : enteredCount > 0 ? (
                             <span>Đã nộp {session.submittedCount ?? enteredCount}</span>
                           ) : (
-                            <span>Chưa có thí sinh</span>
+                            <span>Chưa có HS</span>
                           )}
                         </div>
                       </td>
 
                       {/* 5. Thời gian & Số câu */}
-                      <td className="py-3.5 px-4 align-middle tabular-nums whitespace-nowrap">
-                        <div className="font-semibold text-slate-800">
-                          {session.durationMinutes} phút
+                      <td className="py-3 px-2.5 align-middle tabular-nums whitespace-nowrap">
+                        <div className="font-semibold text-xs text-slate-800">
+                          {session.durationMinutes}p · {session.questionCount} câu
                         </div>
-                        <div className="text-xs text-slate-500">
-                          {session.questionCount} câu • Đạt {session.passScore}/1000
+                        <div className="text-[11px] text-slate-500">
+                          Đạt {session.passScore}/1000
                         </div>
                       </td>
 
                       {/* 6. Công tắc Khóa / Mở khóa ngay trên mỗi dòng */}
-                      <td className="py-3.5 px-4 align-middle whitespace-nowrap">
+                      <td className="py-3 px-2.5 align-middle whitespace-nowrap">
                         {isEnded ? (
                           <span className="text-xs text-slate-400">
-                            Đã kết thúc
+                            Đã đóng
                           </span>
                         ) : isDraft ? (
                           <button
@@ -812,13 +1255,13 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                             disabled={isBusy}
                             onClick={() => void handleToggleLockSwitch(session)}
                             data-testid={`open-draft-btn-${session.code}`}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-teal-600 text-teal-700 hover:bg-teal-50 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-teal-600 text-teal-700 hover:bg-teal-50 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
                           >
-                            <Unlock className="w-3.5 h-3.5" />
-                            Mở ca thi
+                            <Unlock className="w-3 h-3" />
+                            Mở ca
                           </button>
                         ) : (
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
                             <button
                               type="button"
                               role="switch"
@@ -831,128 +1274,87 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                                   ? 'Đang khóa nhận học sinh mới. Bấm để mở khóa.'
                                   : 'Đang mở. Bấm để khóa không cho học sinh mới vào bằng mã (học sinh đang thi vẫn làm tiếp).'
                               }
-                              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
                                 isLocked ? 'bg-amber-600' : 'bg-slate-200'
                               } disabled:opacity-50`}
                             >
                               <span
-                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
-                                  isLocked ? 'translate-x-5' : 'translate-x-0'
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                                  isLocked ? 'translate-x-4' : 'translate-x-0'
                                 }`}
                               />
                             </button>
-                            <span className="text-xs font-medium text-slate-700 inline-flex items-center gap-1 whitespace-nowrap">
+                            <span className="text-[11px] font-semibold text-slate-700 whitespace-nowrap">
                               {isLocked ? (
-                                <>
-                                  <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                                  Đã khóa mã
-                                </>
+                                <span className="text-amber-800">Đã khóa</span>
                               ) : (
-                                <>
-                                  <Unlock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                                  Mở vào thi
-                                </>
+                                <span className="text-emerald-700">Mở</span>
                               )}
                             </span>
                           </div>
                         )}
                       </td>
 
-                      {/* 7. Menu "⋯" trên mỗi dòng */}
+                      {/* 7. Nút thao tác nhanh: Giám sát, Kết quả & Menu "⋯" */}
                       <td
-                        className="py-3.5 px-4 align-middle text-right relative"
+                        className="py-3 px-3 align-middle text-right relative whitespace-nowrap"
                         data-row-menu
                       >
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setOpenMenuSessionId((prev) =>
-                              prev === session.id ? null : session.id
-                            )
-                          }
-                          data-testid={`row-menu-btn-${session.code}`}
-                          className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
-                          aria-label="Menu hành động ca thi"
-                        >
-                          <MoreHorizontal className="w-4 h-4" />
-                        </button>
-
-                        {openMenuSessionId === session.id && (
-                          <div
-                            data-testid={`row-menu-dropdown-${session.code}`}
-                            className="absolute right-4 mt-1.5 w-52 rounded-xl bg-white border border-slate-200 shadow-lg py-1.5 z-30 text-left"
+                        <div className="inline-flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openSessionDetail(session, 'live')}
+                            data-testid={`quick-monitor-btn-${session.code}`}
+                            title="Mở phòng giám sát học sinh đang thi"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-white hover:bg-teal-50 hover:border-teal-300 text-slate-700 hover:text-teal-800 text-xs font-semibold transition-colors cursor-pointer"
                           >
-                            <button
-                              type="button"
-                              onClick={() => {
+                            <Activity className="w-3.5 h-3.5 text-teal-700" />
+                            <span>Giám sát</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openSessionDetail(session, 'results')}
+                            data-testid={`quick-results-btn-${session.code}`}
+                            title="Xem biểu đồ phổ điểm, phân tích câu hỏi và xuất Excel/PDF"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-white hover:bg-teal-50 hover:border-teal-300 text-slate-700 hover:text-teal-800 text-xs font-semibold transition-colors cursor-pointer"
+                          >
+                            <BarChart3 className="w-3.5 h-3.5 text-slate-600" />
+                            <span>Kết quả</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              if (openMenuSessionId === session.id) {
                                 setOpenMenuSessionId(null);
-                                setProjectedSession(session);
-                              }}
-                              className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                            >
-                              <Maximize2 className="w-3.5 h-3.5 text-teal-700" />
-                              Chiếu mã toàn màn hình
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => void handleCloneSession(session)}
-                              data-testid={`menu-clone-${session.code}`}
-                              className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                            >
-                              <Copy className="w-3.5 h-3.5 text-slate-500" />
-                              Tạo bản sao
-                            </button>
-
-                            {!isEnded && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenMenuSessionId(null);
-                                  setConfirmEndSession(session);
-                                }}
-                                data-testid={`menu-end-${session.code}`}
-                                className="w-full px-3.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 flex items-center gap-2 cursor-pointer"
-                              >
-                                <StopCircle className="w-3.5 h-3.5 text-amber-600" />
-                                Kết thúc ca thi
-                              </button>
-                            )}
-
-                            <div className="my-1 border-t border-slate-100" />
-
-                            <button
-                              type="button"
-                              disabled={enteredCount > 0}
-                              onClick={() => {
-                                if (enteredCount > 0) return;
-                                setOpenMenuSessionId(null);
-                                setConfirmDeleteSession(session);
-                              }}
-                              data-testid={`menu-delete-${session.code}`}
-                              title={
-                                enteredCount > 0
-                                  ? 'Chỉ có thể xóa ca thi khi chưa có học sinh nào vào thi'
-                                  : 'Xóa ca thi này'
+                                setOpenMenuAnchor(null);
+                                return;
                               }
-                              className={`w-full px-3.5 py-2 text-xs font-semibold flex items-center justify-between gap-2 ${
-                                enteredCount > 0
-                                  ? 'text-slate-300 cursor-not-allowed'
-                                  : 'text-rose-700 hover:bg-rose-50 cursor-pointer'
-                              }`}
-                            >
-                              <span className="flex items-center gap-2">
-                                <Trash2 className="w-3.5 h-3.5" />
-                                Xóa ca thi
-                              </span>
-                              {enteredCount > 0 && (
-                                <span className="text-[10px] text-slate-400 font-normal">
-                                  Đã có HS thi
-                                </span>
-                              )}
-                            </button>
-                          </div>
-                        )}
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const menuWidth = 224;
+                              const estimatedHeight = 250;
+                              const spaceBelow = window.innerHeight - rect.bottom;
+                              const openUpward =
+                                spaceBelow < estimatedHeight && rect.top > estimatedHeight;
+                              const left = Math.min(
+                                window.innerWidth - menuWidth - 12,
+                                Math.max(12, rect.right - menuWidth)
+                              );
+                              setOpenMenuAnchor({
+                                top: openUpward ? Math.max(12, rect.top - 6) : rect.bottom + 6,
+                                left,
+                                placement: openUpward ? 'top' : 'bottom',
+                              });
+                              setOpenMenuSessionId(session.id);
+                            }}
+                            data-testid={`row-menu-btn-${session.code}`}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
+                            aria-label="Menu hành động ca thi"
+                            aria-expanded={openMenuSessionId === session.id}
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -963,6 +1365,134 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
         </div>
       </div>
 
+      {/* Menu hành động "⋯" nổi qua Portal (không bị cắt bởi khung bảng) */}
+      {openMenuSessionId &&
+        openMenuAnchor &&
+        typeof document !== 'undefined' &&
+        (() => {
+          const menuSession = sessions.find((s) => s.id === openMenuSessionId);
+          if (!menuSession) return null;
+          const menuIsEnded = menuSession.status === 'ended';
+          const menuEnteredCount = menuSession.enteredCount ?? 0;
+
+          return createPortal(
+            <div
+              data-row-menu
+              data-testid={`row-menu-dropdown-${menuSession.code}`}
+              style={{
+                position: 'fixed',
+                top: openMenuAnchor.top,
+                left: openMenuAnchor.left,
+                transform:
+                  openMenuAnchor.placement === 'top'
+                    ? 'translateY(-100%)'
+                    : undefined,
+              }}
+              className="w-56 rounded-xl bg-white border border-slate-200 shadow-xl py-1.5 z-[80] text-left"
+            >
+              {!menuIsEnded && (
+                <button
+                  type="button"
+                  onClick={() => handleOpenEditDrawer(menuSession)}
+                  data-testid={`menu-edit-${menuSession.code}`}
+                  className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5 text-teal-700" />
+                  Chỉnh sửa cấu hình
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenMenuSessionId(null);
+                  setOpenMenuAnchor(null);
+                  void handleCopyShareMessage(menuSession);
+                }}
+                data-testid={`menu-share-${menuSession.code}`}
+                className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+              >
+                <Share2 className="w-3.5 h-3.5 text-teal-700" />
+                Sao chép tin nhắn gửi lớp
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenMenuSessionId(null);
+                  setOpenMenuAnchor(null);
+                  setProjectedSession(menuSession);
+                }}
+                className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+              >
+                <Maximize2 className="w-3.5 h-3.5 text-slate-500" />
+                Chiếu mã toàn màn hình
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void handleCloneSession(menuSession)}
+                data-testid={`menu-clone-${menuSession.code}`}
+                className="w-full px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5 text-slate-500" />
+                Tạo bản sao
+              </button>
+
+              {!menuIsEnded && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenMenuSessionId(null);
+                    setOpenMenuAnchor(null);
+                    setConfirmEndSession(menuSession);
+                  }}
+                  data-testid={`menu-end-${menuSession.code}`}
+                  className="w-full px-3.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 flex items-center gap-2 cursor-pointer"
+                >
+                  <StopCircle className="w-3.5 h-3.5 text-amber-600" />
+                  Kết thúc ca thi
+                </button>
+              )}
+
+              <div className="my-1 border-t border-slate-100" />
+
+              <button
+                type="button"
+                disabled={menuEnteredCount > 0}
+                onClick={() => {
+                  if (menuEnteredCount > 0) return;
+                  setOpenMenuSessionId(null);
+                  setOpenMenuAnchor(null);
+                  setConfirmDeleteSession(menuSession);
+                }}
+                data-testid={`menu-delete-${menuSession.code}`}
+                title={
+                  menuEnteredCount > 0
+                    ? 'Chỉ có thể xóa ca thi khi chưa có học sinh nào vào thi'
+                    : 'Xóa ca thi này'
+                }
+                className={`w-full px-3.5 py-2 text-xs font-semibold flex items-center justify-between gap-2 ${
+                  menuEnteredCount > 0
+                    ? 'text-slate-300 cursor-not-allowed'
+                    : 'text-rose-700 hover:bg-rose-50 cursor-pointer'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Xóa ca thi
+                </span>
+                {menuEnteredCount > 0 && (
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    Đã có HS thi
+                  </span>
+                )}
+              </button>
+            </div>,
+            document.body
+          );
+        })()}
+
       {/* ==========================================================================
           DRAWER BÊN PHẢI: TẠO CA THI (KHÔNG CHUYỂN TRANG)
          ========================================================================== */}
@@ -972,34 +1502,38 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
           data-testid="create-session-drawer-backdrop"
         >
           <div
-            className="w-full max-w-xl bg-white h-full shadow-2xl border-l border-slate-200 flex flex-col justify-between overflow-hidden"
+            className="w-full max-w-xl bg-white h-[100dvh] max-h-[100dvh] shadow-2xl border-l border-slate-200 flex flex-col overflow-hidden"
             data-testid="create-session-drawer"
           >
-            {/* Header Drawer */}
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">
+            {/* Header Drawer cố định */}
+            <div className="sticky top-0 z-10 px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-200 flex items-center justify-between gap-3 bg-slate-50/90 shrink-0">
+              <div className="min-w-0">
+                <h2 className="text-base sm:text-lg font-bold text-slate-900">
                   {createdSessionInDrawer
                     ? 'Đã tạo ca thi thành công'
-                    : 'Tạo ca thi mới'}
+                    : editingSession
+                      ? `Chỉnh sửa ca thi (${editingSession.code})`
+                      : 'Tạo ca thi mới'}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {createdSessionInDrawer
                     ? 'Cung cấp mã 6 ký tự dưới đây cho học sinh nhập vào mục Thi ngay.'
-                    : 'Thiết lập thông tin ca thi và nhận mã 6 ký tự ngay lập tức.'}
+                    : editingSession
+                      ? 'Cập nhật tên ca thi, đối tượng lớp, thời gian, ngưỡng vi phạm hoặc điểm đạt.'
+                      : 'Chọn mẫu cấu hình nhanh hoặc tùy chỉnh thông số và nhận mã 6 ký tự ngay.'}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={handleCloseDrawer}
                 data-testid="close-drawer-btn"
-                className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-200/60 transition-colors cursor-pointer"
+                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-200/60 transition-colors cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Nội dung Drawer: Nếu vừa lưu xong -> Hiện mã lớn kèm nút Sao chép & Chiếu mã */}
+            {/* Nội dung Drawer: Nếu vừa lưu xong -> Hiện mã lớn kèm nút Sao chép, Gửi lớp, Chiếu mã & Giám sát */}
             {createdSessionInDrawer ? (
               <div
                 className="p-6 flex-1 overflow-y-auto flex flex-col items-center justify-center text-center space-y-6"
@@ -1025,11 +1559,11 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                         ? 'Mọi học sinh có mã'
                         : `Lớp ${createdSessionInDrawer.targetClass}`}
                     </strong>{' '}
-                    • {createdSessionInDrawer.questionCount} câu •{' '}
+                    · {createdSessionInDrawer.questionCount} câu ·{' '}
                     {createdSessionInDrawer.durationMinutes} phút
                   </div>
 
-                  <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <div className="pt-2 flex flex-wrap items-center justify-center gap-2.5">
                     <button
                       type="button"
                       onClick={() =>
@@ -1039,7 +1573,7 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                         )
                       }
                       data-testid="drawer-copy-code-btn"
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-sm font-bold transition-colors cursor-pointer"
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition-colors cursor-pointer"
                     >
                       {copiedCodeId === createdSessionInDrawer.id ? (
                         <>
@@ -1049,7 +1583,27 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                       ) : (
                         <>
                           <Copy className="w-4 h-4" />
-                          Sao chép
+                          Sao chép mã
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleCopyShareMessage(createdSessionInDrawer)
+                      }
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      {copiedShareId === createdSessionInDrawer.id ? (
+                        <>
+                          <Check className="w-4 h-4 text-teal-700" />
+                          Đã sao chép tin nhắn
+                        </>
+                      ) : (
+                        <>
+                          <Share2 className="w-4 h-4" />
+                          Gửi lớp (Zalo)
                         </>
                       )}
                     </button>
@@ -1058,7 +1612,7 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                       type="button"
                       onClick={() => setProjectedSession(createdSessionInDrawer)}
                       data-testid="drawer-project-code-btn"
-                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer"
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer"
                     >
                       <Maximize2 className="w-4 h-4" />
                       Chiếu mã
@@ -1066,11 +1620,23 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center justify-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const created = createdSessionInDrawer;
+                      handleCloseDrawer();
+                      openSessionDetail(created, 'live');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-teal-600 text-teal-800 hover:bg-teal-50 text-xs font-bold cursor-pointer"
+                  >
+                    <Activity className="w-4 h-4" />
+                    Mở phòng giám sát
+                  </button>
                   <button
                     type="button"
                     onClick={resetCreateForm}
-                    className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold cursor-pointer"
+                    className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold cursor-pointer"
                   >
                     Tạo thêm ca thi khác
                   </button>
@@ -1078,7 +1644,7 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                     type="button"
                     onClick={handleCloseDrawer}
                     data-testid="drawer-done-btn"
-                    className="px-5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold cursor-pointer"
+                    className="px-5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer"
                   >
                     Hoàn tất
                   </button>
@@ -1088,9 +1654,55 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
               <form
                 onSubmit={(e) => void handleSubmitCreateSession(e)}
                 noValidate
-                className="flex-1 overflow-y-auto p-6 space-y-5"
+                className="flex-1 min-h-0 flex flex-col overflow-hidden"
                 data-testid="create-session-form"
               >
+                <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-5">
+                {/* Mẫu cấu hình nhanh (chỉ hiện khi Tạo mới) */}
+                {!editingSession && (
+                  <div className="space-y-2" data-testid="session-quick-presets">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                      <Zap className="w-3.5 h-3.5 text-teal-700" />
+                      <span>Chọn nhanh mẫu ca thi</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {EXAM_SESSION_PRESETS.map((preset) => {
+                        const active =
+                          Number(questionCount) ===
+                            Math.min(
+                              preset.questionCount,
+                              Math.max(1, questions.length || preset.questionCount)
+                            ) && Number(durationMinutes) === preset.durationMinutes;
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => handleApplyPreset(preset)}
+                            data-testid={`preset-btn-${preset.id}`}
+                            className={`p-2.5 rounded-lg border text-left transition-colors cursor-pointer ${
+                              active
+                                ? 'border-teal-700 bg-teal-50/80 text-teal-900'
+                                : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100/80 text-slate-800'
+                            }`}
+                          >
+                            <div className="text-xs font-bold">{preset.label}</div>
+                            <div className="text-[11px] text-slate-500 tabular-nums mt-0.5">
+                              {preset.subtitle}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {editingSession && (editingSession.enteredCount ?? 0) > 0 && (
+                  <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-900">
+                    Ca thi đã có <strong>{editingSession.enteredCount} học sinh</strong>{' '}
+                    vào làm bài, nên số câu và cách chọn đề được giữ cố định để đảm bảo công bằng.
+                  </div>
+                )}
+
                 {/* 1. Tên ca thi (Bắt buộc) */}
                 <div>
                   <label className="block text-sm font-bold text-slate-800 mb-1.5">
@@ -1233,7 +1845,10 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                       type="number"
                       min={1}
                       max={Math.max(45, questions.length)}
-                      disabled={selectionMode === 'manual'}
+                      disabled={
+                        selectionMode === 'manual' ||
+                        Boolean(editingSession && (editingSession.enteredCount ?? 0) > 0)
+                      }
                       value={
                         selectionMode === 'manual'
                           ? String(manualQuestionIds.length)
@@ -1250,7 +1865,8 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                       }}
                       data-testid="input-session-question-count"
                       className={`w-full px-3.5 py-2.5 rounded-lg border text-sm font-semibold text-slate-900 tabular-nums focus:outline-none focus:ring-2 ${
-                        selectionMode === 'manual'
+                        selectionMode === 'manual' ||
+                        Boolean(editingSession && (editingSession.enteredCount ?? 0) > 0)
                           ? 'bg-slate-100 border-slate-200 text-slate-500'
                           : formErrors.questionCount
                             ? 'border-rose-400 focus:ring-rose-500 bg-rose-50/30'
@@ -1303,24 +1919,26 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                   </div>
                 </div>
 
-                {/* Tuỳ chọn mở thi ngay sau khi tạo */}
-                <label className="flex items-center justify-between gap-3 p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 cursor-pointer">
-                  <div>
-                    <div className="text-sm font-bold text-slate-800">
-                      Mở ca thi ngay sau khi lưu
+                {/* Tuỳ chọn mở thi ngay sau khi tạo (chỉ hiện khi tạo mới) */}
+                {!editingSession && (
+                  <label className="flex items-center justify-between gap-3 p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 cursor-pointer">
+                    <div>
+                      <div className="text-sm font-bold text-slate-800">
+                        Mở ca thi ngay sau khi lưu
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Nếu tắt, ca thi sẽ lưu ở trạng thái Nháp cho đến khi bạn bấm Mở.
+                      </div>
                     </div>
-                    <div className="text-xs text-slate-500">
-                      Nếu tắt, ca thi sẽ lưu ở trạng thái Nháp cho đến khi bạn bấm Mở.
-                    </div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={openImmediately}
-                    onChange={(e) => setOpenImmediately(e.target.checked)}
-                    data-testid="checkbox-open-immediately"
-                    className="w-4 h-4 accent-teal-700 rounded cursor-pointer"
-                  />
-                </label>
+                    <input
+                      type="checkbox"
+                      checked={openImmediately}
+                      onChange={(e) => setOpenImmediately(e.target.checked)}
+                      data-testid="checkbox-open-immediately"
+                      className="w-4 h-4 accent-teal-700 rounded cursor-pointer"
+                    />
+                  </label>
+                )}
 
                 {/* ==============================================================
                     ACCORDION "NÂNG CAO" (ĐÓNG SẴN MẶC ĐỊNH)
@@ -1633,12 +2251,14 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                   )}
                 </div>
 
-                {/* Footer nút Lưu trong Drawer */}
-                <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3">
+                </div>
+
+                {/* Footer nút Lưu cố định trong Drawer */}
+                <div className="sticky bottom-0 z-10 px-4 sm:px-6 py-3.5 bg-white border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
                   <button
                     type="button"
                     onClick={handleCloseDrawer}
-                    className="px-4 py-2.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold cursor-pointer"
+                    className="min-h-[44px] px-4 py-2.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold cursor-pointer"
                   >
                     Hủy
                   </button>
@@ -1646,9 +2266,13 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                     type="submit"
                     disabled={isSubmittingCreate}
                     data-testid="submit-create-session-btn"
-                    className="px-5 py-2.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                    className="min-h-[44px] px-5 py-2.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    {isSubmittingCreate ? 'Đang tạo ca thi...' : 'Lưu ca thi'}
+                    {isSubmittingCreate
+                      ? 'Đang lưu...'
+                      : editingSession
+                        ? 'Lưu thay đổi'
+                        : 'Lưu ca thi'}
                   </button>
                 </div>
               </form>
@@ -1662,37 +2286,39 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
          ========================================================================== */}
       {confirmEndSession && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 sm:p-4 overflow-y-auto"
           data-testid="confirm-end-session-modal"
         >
-          <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 shadow-xl">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  Xác nhận kết thúc ca thi?
-                </h3>
-                <p className="text-sm text-slate-600 mt-1">
-                  Ca thi <strong>{confirmEndSession.title}</strong> (mã{' '}
-                  <span className="font-mono font-bold">
-                    {confirmEndSession.code}
-                  </span>
-                  ) sẽ đóng vĩnh viễn và hệ thống sẽ{' '}
-                  <strong>
-                    tự động thu bài, chấm điểm tất cả học sinh đang làm bài
-                  </strong>
-                  .
-                </p>
+          <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full max-h-[90dvh] flex flex-col overflow-hidden shadow-xl">
+            <div className="p-5 sm:p-6 overflow-y-auto flex-1 min-h-0">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Xác nhận kết thúc ca thi?
+                  </h3>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Ca thi <strong>{confirmEndSession.title}</strong> (mã{' '}
+                    <span className="font-mono font-bold">
+                      {confirmEndSession.code}
+                    </span>
+                    ) sẽ đóng vĩnh viễn và hệ thống sẽ{' '}
+                    <strong>
+                      tự động thu bài, chấm điểm tất cả học sinh đang làm bài
+                    </strong>
+                    .
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-2">
+            <div className="sticky bottom-0 px-5 sm:px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setConfirmEndSession(null)}
-                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-sm font-semibold cursor-pointer"
               >
                 Hủy
               </button>
@@ -1700,7 +2326,7 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                 type="button"
                 onClick={() => void handleConfirmEndSession()}
                 data-testid="confirm-end-session-submit-btn"
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold cursor-pointer"
               >
                 Kết thúc & Thu bài
               </button>
@@ -1714,34 +2340,36 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
          ========================================================================== */}
       {confirmDeleteSession && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 sm:p-4 overflow-y-auto"
           data-testid="confirm-delete-session-modal"
         >
-          <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 shadow-xl">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  Xóa ca thi chưa có thí sinh?
-                </h3>
-                <p className="text-sm text-slate-600 mt-1">
-                  Bạn sắp xóa ca thi <strong>{confirmDeleteSession.title}</strong>{' '}
-                  (mã{' '}
-                  <span className="font-mono font-bold">
-                    {confirmDeleteSession.code}
-                  </span>
-                  ). Thao tác này không thể hoàn tác.
-                </p>
+          <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full max-h-[90dvh] flex flex-col overflow-hidden shadow-xl">
+            <div className="p-5 sm:p-6 overflow-y-auto flex-1 min-h-0">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Xóa ca thi chưa có thí sinh?
+                  </h3>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Bạn sắp xóa ca thi <strong>{confirmDeleteSession.title}</strong>{' '}
+                    (mã{' '}
+                    <span className="font-mono font-bold">
+                      {confirmDeleteSession.code}
+                    </span>
+                    ). Thao tác này không thể hoàn tác.
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-2">
+            <div className="sticky bottom-0 px-5 sm:px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setConfirmDeleteSession(null)}
-                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-sm font-semibold cursor-pointer"
               >
                 Hủy
               </button>
@@ -1749,7 +2377,7 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                 type="button"
                 onClick={() => void handleConfirmDeleteSession()}
                 data-testid="confirm-delete-session-submit-btn"
-                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold cursor-pointer"
               >
                 Xóa ca thi
               </button>
@@ -1766,10 +2394,10 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
           className="fixed inset-0 z-[70] bg-slate-950 text-white flex flex-col justify-between p-6 sm:p-10 select-none"
           data-testid="projected-code-fullscreen-modal"
         >
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <div className="text-sm font-semibold text-teal-400">
-                MÃ VÀO PHÒNG THI TRỰC TIẾP
+                MÃ VÀO PHÒNG THI TRỰC TIẾP · {STATUS_LABELS[projectedSession.status]}
               </div>
               <div className="text-xl sm:text-2xl font-bold text-white mt-0.5">
                 {projectedSession.title}
@@ -1799,7 +2427,7 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
               {projectedSession.code}
             </div>
 
-            <div className="flex flex-wrap items-center justify-center gap-6 text-sm sm:text-base text-slate-300 tabular-nums">
+            <div className="flex flex-wrap items-center justify-center gap-5 text-sm sm:text-base text-slate-300 tabular-nums">
               <span>
                 Đối tượng:{' '}
                 <strong className="text-white">
@@ -1808,20 +2436,58 @@ export const TeacherExamSessionsTab: React.FC<TeacherExamSessionsTabProps> = ({
                     : `Lớp ${projectedSession.targetClass}`}
                 </strong>
               </span>
-              <span>•</span>
+              <span>·</span>
               <span>
                 Số câu:{' '}
                 <strong className="text-white">
                   {projectedSession.questionCount} câu
                 </strong>
               </span>
-              <span>•</span>
+              <span>·</span>
               <span>
                 Thời gian:{' '}
                 <strong className="text-white">
                   {projectedSession.durationMinutes} phút
                 </strong>
               </span>
+              <span>·</span>
+              <span>
+                Đang thi:{' '}
+                <strong className="text-emerald-400">
+                  {projectedSession.inProgressCount ?? 0} HS
+                </strong>
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() =>
+                  void handleCopyCode(projectedSession.code, projectedSession.id)
+                }
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold cursor-pointer"
+              >
+                {copiedCodeId === projectedSession.id ? (
+                  <Check className="w-4 h-4 text-teal-400" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+                {copiedCodeId === projectedSession.id ? 'Đã sao chép mã' : 'Sao chép mã'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCopyShareMessage(projectedSession)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-600 text-white text-sm font-semibold cursor-pointer"
+              >
+                {copiedShareId === projectedSession.id ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <Share2 className="w-4 h-4" />
+                )}
+                {copiedShareId === projectedSession.id
+                  ? 'Đã sao chép tin nhắn'
+                  : 'Sao chép gửi lớp (Zalo)'}
+              </button>
             </div>
           </div>
 

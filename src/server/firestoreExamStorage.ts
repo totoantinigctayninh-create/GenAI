@@ -4,6 +4,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   getFirestore,
   initializeFirestore,
@@ -203,6 +204,42 @@ export function createFirestoreExamStorageAdapter(): ExamStorageAdapter {
 }
 
 /**
+ * Tra cứu tài khoản người dùng chỉ đọc trực tiếp từ Firestore (hỗ trợ đăng nhập ngay cả khi máy chủ vừa khởi động).
+ */
+export async function lookupUserFromFirestore(
+  usernameOrId: string
+): Promise<UserAccount | null> {
+  const clean = String(usernameOrId || '').trim();
+  if (!clean) return null;
+
+  try {
+    const directSnap = await getDoc(doc(db, 'users', clean));
+    if (directSnap.exists()) {
+      const data = directSnap.data() as UserAccount;
+      if (!isLegacyVirtualUser(data)) {
+        return { ...data, id: data.id || directSnap.id };
+      }
+    }
+
+    const allSnap = await getDocs(collection(db, 'users'));
+    for (const d of allSnap.docs) {
+      const data = d.data() as UserAccount;
+      if (isLegacyVirtualUser(data)) continue;
+      if (
+        (data.id && data.id.toLowerCase() === clean.toLowerCase()) ||
+        (data.username && data.username.toLowerCase() === clean.toLowerCase())
+      ) {
+        return { ...data, id: data.id || d.id };
+      }
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `users/${clean}`);
+  }
+
+  return null;
+}
+
+/**
  * Khởi tạo dữ liệu ban đầu và đồng bộ thời gian thực từ Firestore vào `ExamSessionEngine`
  */
 export async function syncEngineWithFirestore(
@@ -304,6 +341,62 @@ export async function syncEngineWithFirestore(
     (err) => handleFirestoreError(err, OperationType.LIST, 'questions')
   );
 
+  // Lắng nghe thời gian thực các lượt thi, đáp án và sự kiện vi phạm từ Firestore
+  // để đảm bảo giám sát tức thời ngay cả khi chạy nhiều thực thể Cloud Run
+  let initialAttemptsSkipped = false;
+  const unsubAttempts = onSnapshot(
+    collection(db, 'attempts'),
+    (snap) => {
+      if (!initialAttemptsSkipped) {
+        initialAttemptsSkipped = true;
+        return;
+      }
+      const changedSessionIds = new Set<string>();
+      const changedAttempts: SessionAttemptRecord[] = [];
+      for (const change of snap.docChanges()) {
+        if (change.type === 'added' || change.type === 'modified') {
+          const data = change.doc.data() as SessionAttemptRecord;
+          if (data && data.id && data.sessionId) {
+            changedAttempts.push(data);
+            changedSessionIds.add(data.sessionId);
+          }
+        }
+      }
+      if (changedAttempts.length > 0) {
+        engine.hydrateState({ attempts: changedAttempts });
+        engine.notifyExternalSync(changedSessionIds);
+      }
+    },
+    (err) => handleFirestoreError(err, OperationType.LIST, 'attempts')
+  );
+
+  let initialViolationsSkipped = false;
+  const unsubViolations = onSnapshot(
+    collection(db, 'violation_events'),
+    (snap) => {
+      if (!initialViolationsSkipped) {
+        initialViolationsSkipped = true;
+        return;
+      }
+      const changedSessionIds = new Set<string>();
+      const changedViolations: ViolationEventRecord[] = [];
+      for (const change of snap.docChanges()) {
+        if (change.type === 'added' || change.type === 'modified') {
+          const data = change.doc.data() as ViolationEventRecord;
+          if (data && data.id && data.sessionId) {
+            changedViolations.push(data);
+            changedSessionIds.add(data.sessionId);
+          }
+        }
+      }
+      if (changedViolations.length > 0) {
+        engine.hydrateState({ violations: changedViolations });
+        engine.notifyExternalSync(changedSessionIds);
+      }
+    },
+    (err) => handleFirestoreError(err, OperationType.LIST, 'violation_events')
+  );
+
   // Tác vụ nền quét định kỳ mỗi 5 giây để tự động thu bài hết giờ
   const sweepTimer = setInterval(() => {
     engine.sweepExpiredAttempts();
@@ -312,6 +405,8 @@ export async function syncEngineWithFirestore(
   return () => {
     unsubUsers();
     unsubQuestions();
+    unsubAttempts();
+    unsubViolations();
     clearInterval(sweepTimer);
   };
 }

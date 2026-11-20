@@ -155,10 +155,11 @@ html.dark {
 
 /* 1. Bề mặt Nền & Khung Thẻ (Surfaces & Cards) */
 html.dark .bg-white:not(.keep-light) {
-  background-color: #111827 !important;
+  background-color: var(--color-bg-surface) !important;
 }
 
-html.dark .bg-white\/95:not(.keep-light) {
+html.dark .bg-white\/95:not(.keep-light),
+html.dark .bg-white\/90:not(.keep-light) {
   background-color: rgba(17, 24, 39, 0.95) !important;
 }
 
@@ -173,7 +174,8 @@ html.dark .bg-slate-50\/90 {
 }
 
 html.dark .bg-slate-100,
-html.dark .bg-slate-100\/80 {
+html.dark .bg-slate-100\/80,
+html.dark .bg-slate-100\/90 {
   background-color: #1e293b !important;
 }
 
@@ -183,7 +185,8 @@ html.dark .bg-slate-200 {
 
 html.dark .hover\:bg-slate-50:hover,
 html.dark .hover\:bg-slate-50\/80:hover,
-html.dark .hover\:bg-slate-100:hover {
+html.dark .hover\:bg-slate-100:hover,
+html.dark .hover\:bg-slate-100\/80:hover {
   background-color: #1e293b !important;
 }
 
@@ -193,49 +196,80 @@ html.dark .hover\:bg-slate-200:hover {
 
 /* 2. Bề mặt ngữ nghĩa dịu mắt (Semantic Tinted Surfaces) */
 html.dark .bg-teal-50,
+html.dark .bg-teal-50\/25,
+html.dark .bg-teal-50\/30,
 html.dark .bg-teal-50\/40,
 html.dark .bg-teal-50\/50,
 html.dark .bg-teal-50\/60,
 html.dark .bg-teal-50\/70,
-html.dark .bg-teal-50\/80 {
-  background-color: rgba(19, 78, 74, 0.35) !important;
+html.dark .bg-teal-50\/80,
+html.dark .bg-teal-50\/90,
+html.dark .hover\:bg-teal-50\/25:hover,
+html.dark .hover\:bg-teal-50\/30:hover {
+  background-color: rgba(19, 78, 74, 0.38) !important;
 }
 
-html.dark .bg-teal-100 {
-  background-color: rgba(15, 118, 110, 0.45) !important;
+html.dark .bg-teal-100,
+html.dark .bg-teal-100\/90,
+html.dark .hover\:bg-teal-100:hover,
+html.dark .hover\:bg-teal-100\/90:hover {
+  background-color: rgba(15, 118, 110, 0.48) !important;
 }
 
 html.dark .bg-emerald-50,
 html.dark .bg-emerald-50\/40,
 html.dark .bg-emerald-50\/60,
-html.dark .bg-emerald-50\/70 {
-  background-color: rgba(6, 78, 59, 0.35) !important;
+html.dark .bg-emerald-50\/65,
+html.dark .bg-emerald-50\/70,
+html.dark .bg-emerald-50\/75,
+html.dark .bg-emerald-50\/80,
+html.dark .bg-emerald-50\/85 {
+  background-color: rgba(6, 78, 59, 0.38) !important;
 }
 
-html.dark .bg-emerald-100 {
-  background-color: rgba(6, 95, 70, 0.5) !important;
+html.dark .bg-emerald-100,
+html.dark .bg-emerald-100\/80 {
+  background-color: rgba(6, 95, 70, 0.52) !important;
 }
 
 html.dark .bg-rose-50,
+html.dark .bg-rose-50\/30,
+html.dark .bg-rose-50\/35,
 html.dark .bg-rose-50\/50,
 html.dark .bg-rose-50\/60,
-html.dark .bg-rose-50\/70 {
-  background-color: rgba(136, 19, 55, 0.35) !important;
+html.dark .bg-rose-50\/70,
+html.dark .bg-rose-50\/75,
+html.dark .bg-rose-50\/80,
+html.dark .bg-rose-50\/85,
+html.dark .bg-rose-50\/95,
+html.dark .hover\:bg-rose-50:hover,
+html.dark .hover\:bg-rose-50\/50:hover,
+html.dark .hover\:bg-rose-50\/60:hover {
+  background-color: rgba(136, 19, 55, 0.36) !important;
 }
 
-html.dark .bg-rose-100 {
-  background-color: rgba(159, 18, 57, 0.45) !important;
+html.dark .bg-rose-100,
+html.dark .bg-rose-100\/80,
+html.dark .hover\:bg-rose-100:hover {
+  background-color: rgba(159, 18, 57, 0.48) !important;
 }
 
 html.dark .bg-amber-50,
+html.dark .bg-amber-50\/30,
+html.dark .bg-amber-50\/40,
 html.dark .bg-amber-50\/50,
 html.dark .bg-amber-50\/60,
-html.dark .bg-amber-50\/70 {
-  background-color: rgba(120, 53, 15, 0.35) !important;
+html.dark .bg-amber-50\/65,
+html.dark .bg-amber-50\/70,
+html.dark .bg-amber-50\/80,
+html.dark .bg-amber-50\/95,
+html.dark .hover\:bg-amber-50\/50:hover {
+  background-color: rgba(120, 53, 15, 0.32) !important;
 }
 
-html.dark .bg-amber-100 {
-  background-color: rgba(146, 64, 14, 0.45) !important;
+html.dark .bg-amber-100,
+html.dark .bg-amber-100\/90 {
+  background-color: rgba(146, 64, 14, 0.48) !important;
 }
 
 html.dark .bg-indigo-50,
@@ -249,18 +283,19 @@ html.dark .bg-indigo-100 {
 }
 
 html.dark .bg-sky-50,
-html.dark .bg-sky-50\/60 {
-  background-color: rgba(12, 74, 110, 0.35) !important;
+html.dark .bg-sky-50\/60,
+html.dark .bg-sky-50\/80 {
+  background-color: rgba(12, 74, 110, 0.38) !important;
 }
 
 /* 3. Phân cấp Chữ độ tương phản êm dịu (Typography Contrast) */
 html.dark .text-slate-900,
 html.dark .text-slate-950 {
-  color: #f8fafc !important;
+  color: var(--color-text-primary) !important;
 }
 
 html.dark .text-slate-800 {
-  color: #e2e8f0 !important;
+  color: var(--color-text-secondary) !important;
 }
 
 html.dark .text-slate-700 {
@@ -268,15 +303,15 @@ html.dark .text-slate-700 {
 }
 
 html.dark .text-slate-600 {
-  color: #94a3b8 !important;
+  color: var(--color-text-muted) !important;
 }
 
 html.dark .text-slate-500 {
-  color: #94a3b8 !important;
+  color: var(--color-text-muted) !important;
 }
 
 html.dark .text-slate-400 {
-  color: #64748b !important;
+  color: #94a3b8 !important;
 }
 
 html.dark .text-teal-950,
@@ -320,41 +355,55 @@ html.dark .text-sky-700 {
   color: #7dd3fc !important;
 }
 
-/* 4. Đường viền & Đường phân cách (Borders & Dividers) */
+/* 4. Đường viền, Vòng sáng & Đường phân cách (Borders, Ring Offsets & Dividers) */
 html.dark .border-slate-100,
 html.dark .border-slate-200,
+html.dark .border-slate-200\/60,
+html.dark .border-slate-200\/70,
 html.dark .border-slate-200\/80,
 html.dark .border-slate-200\/90 {
-  border-color: #1e293b !important;
+  border-color: var(--color-border-subtle) !important;
 }
 
 html.dark .border-slate-300 {
-  border-color: #334155 !important;
+  border-color: var(--color-border-strong) !important;
 }
 
 html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
-html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
-  border-color: #1e293b !important;
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-200\/80 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--color-border-subtle) !important;
 }
 
 html.dark .border-teal-200,
+html.dark .border-teal-200\/90,
 html.dark .border-teal-300 {
-  border-color: rgba(45, 212, 191, 0.35) !important;
+  border-color: var(--color-accent-border) !important;
+}
+
+html.dark .border-sky-200,
+html.dark .border-sky-200\/70 {
+  border-color: rgba(56, 189, 248, 0.32) !important;
 }
 
 html.dark .border-emerald-200,
+html.dark .border-emerald-200\/80,
+html.dark .border-emerald-200\/90,
 html.dark .border-emerald-300 {
-  border-color: rgba(52, 211, 153, 0.35) !important;
+  border-color: rgba(52, 211, 153, 0.38) !important;
 }
 
 html.dark .border-rose-200,
+html.dark .border-rose-200\/80,
+html.dark .border-rose-200\/90,
 html.dark .border-rose-300 {
-  border-color: rgba(251, 113, 133, 0.35) !important;
+  border-color: var(--color-danger-border) !important;
 }
 
 html.dark .border-amber-200,
+html.dark .border-amber-200\/80,
 html.dark .border-amber-300 {
-  border-color: rgba(251, 191, 36, 0.35) !important;
+  border-color: rgba(251, 191, 36, 0.38) !important;
 }
 
 html.dark .border-indigo-200,
@@ -362,13 +411,18 @@ html.dark .border-indigo-300 {
   border-color: rgba(129, 140, 248, 0.35) !important;
 }
 
+html.dark .ring-offset-1,
+html.dark .ring-offset-2 {
+  --tw-ring-offset-color: var(--color-bg-surface) !important;
+}
+
 /* 5. Ô nhập liệu, Select & Textarea trong Dark Mode */
 html.dark input:not([type="checkbox"]):not([type="radio"]),
 html.dark select,
 html.dark textarea {
   background-color: #0f172a !important;
-  color: #f8fafc !important;
-  border-color: #334155 !important;
+  color: var(--color-text-primary) !important;
+  border-color: var(--color-border-strong) !important;
 }
 
 html.dark input::placeholder,

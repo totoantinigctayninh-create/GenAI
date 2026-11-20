@@ -371,3 +371,30 @@ export interface StudentAttemptResultPayload {
   topicBreakdown?: BreakdownStatItem[];
   typeBreakdown?: BreakdownStatItem[];
 }
+
+export type SessionRealtimeEventType =
+  | 'student:joined'
+  | 'student:progress'
+  | 'student:violation'
+  | 'student:violation_updated'
+  | 'student:submitted'
+  | 'session:updated'
+  | 'session:synced';
+
+export interface SessionRealtimeEvent {
+  type: SessionRealtimeEventType;
+  sessionId: string;
+  emittedAt: string;
+  attemptId?: string;
+  studentId?: string;
+  studentName?: string;
+  username?: string;
+  className?: string;
+  violation?: ViolationEventRecord;
+  violationCount?: number;
+  maxViolations?: number;
+  countsTowardLimit?: boolean;
+  autoSubmitted?: boolean;
+  submitReason?: AttemptSubmitReason | null;
+}
+

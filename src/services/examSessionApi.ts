@@ -6,10 +6,8 @@ import {
   onSnapshot,
   setDoc,
 } from 'firebase/firestore';
-import { SEED_USERS } from '../data/seedData';
-import {
+import type {
   CreateExamSessionInput,
-  ExamEngineError,
   ExamSessionEngine,
   ExamStorageAdapter,
   UpdateExamSessionInput,
@@ -27,6 +25,7 @@ import {
   ExamAuditLogRecord,
   ExamSessionRecord,
   SessionAttemptRecord,
+  SessionRealtimeEvent,
   StudentAttemptPaperPayload,
   StudentAttemptResultPayload,
   TeacherSessionDetailPayload,
@@ -35,8 +34,7 @@ import {
   ViolationEventType,
 } from '../types/examSession';
 
-const USERS_CACHE_KEY = 'certiport_genai_users_cache_v3';
-const QUESTIONS_CACHE_KEY = 'certiport_genai_questions_cache_v3';
+const AUTH_TOKEN_STORAGE_KEY = 'certiport_genai_auth_token_v1';
 const LOCAL_EXAM_ENGINE_CACHE_KEY = 'certiport_exam_sessions_engine_cache_v1';
 
 interface CachedEngineSnapshot {
@@ -57,15 +55,26 @@ function stripUndefinedFields<T extends object>(obj: T): Record<string, unknown>
   return clean;
 }
 
-function loadLocalArray<T>(key: string): T[] {
-  if (typeof window === 'undefined') return [];
+function loadStoredAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    return token && token.trim() ? token.trim() : null;
   } catch {
-    return [];
+    return null;
+  }
+}
+
+function persistStoredAuthToken(token: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token && token.trim()) {
+      window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token.trim());
+    } else {
+      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // Bỏ qua nếu bộ nhớ cục bộ bị chặn
   }
 }
 
@@ -124,8 +133,12 @@ function saveLocalEngineSnapshot(snapshot: CachedEngineSnapshot): void {
 }
 
 let clientEngineInstance: ExamSessionEngine | null = null;
+let clientEngineLoadPromise: Promise<ExamSessionEngine> | null = null;
 let clientEngineHydrationPromise: Promise<void> | null = null;
 let activeProfileContext: UserAccount | null = null;
+let pendingFallbackUsers: UserAccount[] = [];
+let pendingFallbackQuestions: Question[] = [];
+let currentAuthToken: string | null = loadStoredAuthToken();
 let serverApiUnavailable = false;
 
 function createClientStorageAdapter(): ExamStorageAdapter {
@@ -273,39 +286,41 @@ function createClientStorageAdapter(): ExamStorageAdapter {
 }
 
 function hydrateClientEngineFromLocalCache(engine: ExamSessionEngine): void {
-  const cachedUsers = loadLocalArray<UserAccount>(USERS_CACHE_KEY).filter(
-    (u) => !isLegacyVirtualUser(u)
-  );
-  if (cachedUsers.length > 0) {
-    engine.setUsers([...SEED_USERS, ...cachedUsers]);
-  }
   if (activeProfileContext) {
     engine.upsertUser(activeProfileContext);
   }
-
-  const cachedQuestions = loadLocalArray<Question>(QUESTIONS_CACHE_KEY).filter(
-    (q) => !isLegacyVirtualQuestion(q)
-  );
-  if (cachedQuestions.length > 0) {
-    engine.setQuestions(cachedQuestions);
+  if (pendingFallbackUsers.length > 0) {
+    engine.setUsers(pendingFallbackUsers);
+  }
+  if (pendingFallbackQuestions.length > 0) {
+    engine.setQuestions(pendingFallbackQuestions);
   }
 
   const localSnapshot = loadLocalEngineSnapshot();
   engine.hydrateState(localSnapshot);
 }
 
-function getClientExamEngine(): ExamSessionEngine {
-  if (!clientEngineInstance) {
-    clientEngineInstance = new ExamSessionEngine({
-      storageAdapter: createClientStorageAdapter(),
-    });
-    hydrateClientEngineFromLocalCache(clientEngineInstance);
+async function getClientExamEngineAsync(): Promise<ExamSessionEngine> {
+  if (clientEngineInstance) {
+    return clientEngineInstance;
   }
-  return clientEngineInstance;
+  if (!clientEngineLoadPromise) {
+    clientEngineLoadPromise = import('../server/examSessionEngine').then(
+      ({ ExamSessionEngine: EngineClass }) => {
+        const instance = new EngineClass({
+          storageAdapter: createClientStorageAdapter(),
+        });
+        hydrateClientEngineFromLocalCache(instance);
+        clientEngineInstance = instance;
+        return instance;
+      }
+    );
+  }
+  return clientEngineLoadPromise;
 }
 
 async function ensureClientEngineHydrated(): Promise<ExamSessionEngine> {
-  const engine = getClientExamEngine();
+  const engine = await getClientExamEngineAsync();
   hydrateClientEngineFromLocalCache(engine);
 
   if (!clientEngineHydrationPromise && typeof window !== 'undefined') {
@@ -334,7 +349,7 @@ async function ensureClientEngineHydrated(): Promise<ExamSessionEngine> {
             .map((d) => d.data() as UserAccount)
             .filter((u) => !isLegacyVirtualUser(u));
           if (users.length > 0) {
-            engine.setUsers([...SEED_USERS, ...users]);
+            engine.setUsers(users);
           }
         }
         if (activeProfileContext) {
@@ -460,8 +475,11 @@ async function apiRequest<T>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-user-id': options.userId,
   };
+  const authToken = currentAuthToken || loadStoredAuthToken();
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
   const role =
     options.roleHint ||
     (activeProfileContext &&
@@ -470,30 +488,6 @@ async function apiRequest<T>(
       ? activeProfileContext.role
       : undefined);
 
-  if (role) {
-    headers['x-user-role'] = role;
-  }
-  if (
-    activeProfileContext &&
-    (activeProfileContext.id === options.userId ||
-      activeProfileContext.username === options.userId)
-  ) {
-    if (activeProfileContext.fullName) {
-      headers['x-user-fullname'] = encodeURIComponent(
-        activeProfileContext.fullName
-      );
-    }
-    if (activeProfileContext.username) {
-      headers['x-user-username'] = encodeURIComponent(
-        activeProfileContext.username
-      );
-    }
-    if (activeProfileContext.className) {
-      headers['x-user-class'] = encodeURIComponent(
-        activeProfileContext.className
-      );
-    }
-  }
   if (options.sessionToken) {
     headers['x-exam-session-token'] = options.sessionToken;
   }
@@ -524,7 +518,7 @@ async function apiRequest<T>(
       data = null;
     }
 
-    // Nếu máy chủ trả về trang tĩnh HTML hoặc lỗi 404 plain-text (ví dụ "The page could not be found" trên static host),
+    // Nếu máy chủ trả về trang tĩnh HTML hoặc lỗi 404 plain-text (ví dụ static host không có backend),
     // chuyển sang chạy trực tiếp trên ExamSessionEngine đồng bộ Firestore ở trình duyệt.
     if (!data || typeof data !== 'object') {
       serverApiUnavailable = true;
@@ -536,10 +530,25 @@ async function apiRequest<T>(
     }
 
     if (!response.ok && data.ok === false) {
-      // Nếu máy chủ báo chưa có tài khoản hoặc chưa có ca thi do vừa khởi động lại, thử trên engine đồng bộ Firestore
       const errorCode = String(data.errorCode || '');
+      // Tuyệt đối không bỏ qua lỗi phân quyền / xác thực (401/403) bằng fallback cục bộ
       if (
+        response.status === 401 ||
+        response.status === 403 ||
         errorCode === 'UNAUTHORIZED' ||
+        errorCode === 'FORBIDDEN_ROLE' ||
+        errorCode === 'FORBIDDEN_SESSION_ACCESS' ||
+        errorCode === 'FORBIDDEN_ATTEMPT_OWNERSHIP'
+      ) {
+        throw new Error(
+          String(
+            data.message ||
+              'Phiên đăng nhập không hợp lệ hoặc bạn không có quyền thực hiện thao tác này.'
+          )
+        );
+      }
+
+      if (
         errorCode === 'SESSION_NOT_FOUND' ||
         errorCode === 'ATTEMPT_NOT_FOUND'
       ) {
@@ -550,7 +559,11 @@ async function apiRequest<T>(
           }
           return await fallbackHandler(engine);
         } catch (fallbackErr) {
-          if (fallbackErr instanceof ExamEngineError) {
+          if (
+            fallbackErr instanceof Error &&
+            (fallbackErr.name === 'ExamEngineError' ||
+              typeof (fallbackErr as { status?: number }).status === 'number')
+          ) {
             throw new Error(fallbackErr.message);
           }
           throw new Error(String(data.message || 'Yêu cầu thất bại.'));
@@ -559,13 +572,18 @@ async function apiRequest<T>(
       throw new Error(String(data.message || 'Yêu cầu thất bại.'));
     }
 
-    // Đồng bộ kết quả từ máy chủ vào bộ nhớ clientEngine để giữ nhất quán
-    const engine = getClientExamEngine();
-    if (data.session && typeof data.session === 'object') {
-      engine.hydrateState({ sessions: [data.session as ExamSessionRecord] });
-    }
-    if (Array.isArray(data.sessions)) {
-      engine.hydrateState({ sessions: data.sessions as ExamSessionRecord[] });
+    // Đồng bộ kết quả từ máy chủ vào bộ nhớ clientEngine nếu đã khởi tạo fallback
+    if (clientEngineInstance) {
+      if (data.session && typeof data.session === 'object') {
+        clientEngineInstance.hydrateState({
+          sessions: [data.session as ExamSessionRecord],
+        });
+      }
+      if (Array.isArray(data.sessions)) {
+        clientEngineInstance.hydrateState({
+          sessions: data.sessions as ExamSessionRecord[],
+        });
+      }
     }
     return data as unknown as T;
   } catch (error) {
@@ -589,31 +607,206 @@ async function apiRequest<T>(
 }
 
 export const examSessionApi = {
+  getAuthToken(): string | null {
+    if (!currentAuthToken) {
+      currentAuthToken = loadStoredAuthToken();
+    }
+    return currentAuthToken;
+  },
+
+  setAuthToken(token: string | null): void {
+    currentAuthToken = token && token.trim() ? token.trim() : null;
+    persistStoredAuthToken(currentAuthToken);
+  },
+
+  clearAuthToken(): void {
+    currentAuthToken = null;
+    activeProfileContext = null;
+    persistStoredAuthToken(null);
+  },
+
   /**
-   * Đồng bộ tài khoản đang đăng nhập, danh sách người dùng và ngân hàng câu hỏi
-   * cho cả bộ xử lý Ca thi ở trình duyệt (Firestore) lẫn máy chủ Express.
+   * Lấy tổng số câu hỏi chuẩn hóa cho màn hình đăng nhập mà không tải về đáp án.
+   */
+  async getPublicStats(): Promise<{ questionsCount: number } | null> {
+    if (typeof window === 'undefined' || serverApiUnavailable) return null;
+    try {
+      const response = await fetch('/api/public/stats');
+      if (!response.ok) return null;
+      const data = (await response.json()) as {
+        ok?: boolean;
+        questionsCount?: number;
+      };
+      if (data && data.ok && typeof data.questionsCount === 'number') {
+        return { questionsCount: data.questionsCount };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Đăng nhập qua máy chủ Express để nhận mã phiên HMAC-SHA256 hợp lệ.
+   * Trả về `null` chỉ khi máy chủ API không khả dụng (ví dụ chạy static host không có backend).
+   */
+  async login(
+    username: string,
+    password: string
+  ): Promise<{ token: string; user: UserAccount } | null> {
+    if (typeof window === 'undefined' || serverApiUnavailable) {
+      return null;
+    }
+
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const rawText = await response.text();
+      let data: Record<string, unknown> | null = null;
+      try {
+        data = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : null;
+      } catch {
+        data = null;
+      }
+
+      if (!data || typeof data !== 'object') {
+        serverApiUnavailable = true;
+        return null;
+      }
+
+      if (!response.ok || data.ok === false) {
+        throw new Error(
+          String(
+            data.message || 'Tên đăng nhập hoặc mật khẩu không chính xác.'
+          )
+        );
+      }
+
+      const token = typeof data.token === 'string' ? data.token : '';
+      const user = data.user as UserAccount | undefined;
+      if (!token || !user) {
+        throw new Error('Máy chủ không cấp được mã phiên hợp lệ.');
+      }
+
+      this.setAuthToken(token);
+      activeProfileContext = user;
+      return { token, user };
+    } catch (error) {
+      if (
+        error instanceof TypeError ||
+        (error instanceof Error &&
+          (error.message.includes('Failed to fetch') ||
+            error.message.includes('NetworkError')))
+      ) {
+        serverApiUnavailable = true;
+        return null;
+      }
+      throw error;
+    }
+  },
+
+  /**
+   * Xác thực lại mã phiên HMAC-SHA256 hiện tại với máy chủ khi tải lại trang.
+   */
+  async verifySession(): Promise<
+    | { status: 'valid'; user: UserAccount }
+    | { status: 'invalid'; message: string }
+    | { status: 'offline' }
+  > {
+    if (typeof window === 'undefined' || serverApiUnavailable) {
+      return { status: 'offline' };
+    }
+    const token = this.getAuthToken();
+    if (!token) {
+      return {
+        status: 'invalid',
+        message: 'Phiên đăng nhập đã hết hạn hoặc cần xác thực lại. Vui lòng đăng nhập để tiếp tục.',
+      };
+    }
+
+    try {
+      const response = await fetch('/api/auth/me', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const rawText = await response.text();
+      let data: Record<string, unknown> | null = null;
+      try {
+        data = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : null;
+      } catch {
+        data = null;
+      }
+
+      if (!data || typeof data !== 'object') {
+        serverApiUnavailable = true;
+        return { status: 'offline' };
+      }
+
+      if (!response.ok || data.ok === false) {
+        this.clearAuthToken();
+        return {
+          status: 'invalid',
+          message: String(
+            data.message ||
+              'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.'
+          ),
+        };
+      }
+
+      const user = data.user as UserAccount;
+      activeProfileContext = user;
+      return { status: 'valid', user };
+    } catch {
+      return { status: 'offline' };
+    }
+  },
+
+  /**
+   * Đồng bộ tài khoản đang đăng nhập, danh sách người dùng và ngân hàng câu hỏi.
+   * Chỉ tài khoản giáo viên có mã phiên HMAC hợp lệ mới được phép gửi đồng bộ lên máy chủ Express.
    */
   syncContext(context: {
     currentUser?: UserAccount | null;
     users?: UserAccount[];
     questions?: Question[];
   }): void {
-    const engine = getClientExamEngine();
-    if (Array.isArray(context.users) && context.users.length > 0) {
-      engine.setUsers([...SEED_USERS, ...context.users]);
-    }
     if (context.currentUser) {
       activeProfileContext = context.currentUser;
-      engine.upsertUser(context.currentUser);
-    }
-    if (Array.isArray(context.questions) && context.questions.length > 0) {
-      engine.setQuestions(context.questions);
+      clientEngineInstance?.upsertUser(context.currentUser);
+    } else {
+      activeProfileContext = null;
     }
 
-    if (typeof window !== 'undefined' && !serverApiUnavailable) {
+    const isTeacher = context.currentUser?.role === 'teacher';
+    if (isTeacher && Array.isArray(context.users) && context.users.length > 0) {
+      pendingFallbackUsers = context.users;
+      clientEngineInstance?.setUsers(context.users);
+    }
+    if (Array.isArray(context.questions)) {
+      if (isTeacher || context.questions.length === 0) {
+        pendingFallbackQuestions = context.questions;
+        clientEngineInstance?.setQuestions(context.questions);
+      }
+    }
+
+    const token = this.getAuthToken();
+    if (
+      typeof window !== 'undefined' &&
+      !serverApiUnavailable &&
+      isTeacher &&
+      token
+    ) {
       void fetch('/api/exam-sessions/sync-context', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           currentUser: context.currentUser ?? undefined,
           users: context.users,
@@ -1056,6 +1249,116 @@ export const examSessionApi = {
         }),
       })
     );
+  },
+
+  updateViolationAwayDuration(
+    studentId: string,
+    attemptId: string,
+    violationId: string,
+    sessionToken: string,
+    awaySeconds: number
+  ) {
+    return apiRequest<{ ok: true; violation: ViolationEventRecord }>(
+      `/api/attempts/${encodeURIComponent(attemptId)}/violations/${encodeURIComponent(violationId)}`,
+      {
+        method: 'PATCH',
+        userId: studentId,
+        roleHint: 'student',
+        sessionToken,
+        body: { awaySeconds },
+      },
+      (engine) => ({
+        ok: true,
+        violation: engine.updateViolationAwayDuration(
+          studentId,
+          attemptId,
+          violationId,
+          awaySeconds,
+          sessionToken
+        ),
+      })
+    );
+  },
+
+  /**
+   * Mở luồng giám sát thời gian thực (SSE) cho giáo viên theo dõi một ca thi.
+   * Tự động nhận bản chụp trạng thái ban đầu và mọi sự kiện học sinh vào phòng, làm bài, vi phạm gian lận tức thời.
+   */
+  subscribeToSessionStream(
+    teacherId: string,
+    sessionId: string,
+    handlers: {
+      onSnapshot: (detail: TeacherSessionDetailPayload) => void;
+      onUpdate: (
+        event: SessionRealtimeEvent,
+        detail: TeacherSessionDetailPayload
+      ) => void;
+      onStatusChange?: (status: 'connected' | 'reconnecting' | 'offline') => void;
+    }
+  ): () => void {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') {
+      handlers.onStatusChange?.('offline');
+      return () => {};
+    }
+
+    const authToken = this.getAuthToken();
+    if (!authToken) {
+      handlers.onStatusChange?.('offline');
+      return () => {};
+    }
+
+    const params = new URLSearchParams({
+      authToken,
+    });
+    const url = `/api/exam-sessions/${encodeURIComponent(sessionId)}/stream?${params.toString()}`;
+    let closed = false;
+    const es = new EventSource(url);
+
+    es.onopen = () => {
+      if (closed) return;
+      handlers.onStatusChange?.('connected');
+    };
+
+    es.addEventListener('snapshot', (ev: MessageEvent) => {
+      if (closed) return;
+      try {
+        const parsed = JSON.parse(ev.data) as TeacherSessionDetailPayload & {
+          ok?: boolean;
+        };
+        handlers.onStatusChange?.('connected');
+        handlers.onSnapshot(parsed);
+      } catch {
+        // Bỏ qua payload lỗi định dạng
+      }
+    });
+
+    es.addEventListener('update', (ev: MessageEvent) => {
+      if (closed) return;
+      try {
+        const parsed = JSON.parse(ev.data) as {
+          event: SessionRealtimeEvent;
+          detail: TeacherSessionDetailPayload;
+        };
+        if (parsed?.detail && parsed?.event) {
+          handlers.onStatusChange?.('connected');
+          handlers.onUpdate(parsed.event, parsed.detail);
+        }
+      } catch {
+        // Bỏ qua payload lỗi định dạng
+      }
+    });
+
+    es.onerror = () => {
+      if (closed) return;
+      handlers.onStatusChange?.(
+        es.readyState === EventSource.CLOSED ? 'offline' : 'reconnecting'
+      );
+    };
+
+    return () => {
+      closed = true;
+      es.close();
+    };
   },
 
   submitAttempt(

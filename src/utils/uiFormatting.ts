@@ -1,3 +1,4 @@
+import { UserAnswer } from '../types/exam';
 import { CodeVerifyRejectionReason } from '../types/examSession';
 
 export const SHORT_TOPIC_NAMES: Record<string, string> = {
@@ -96,4 +97,27 @@ export function formatVerifyCodeErrorMessage(
     default:
       return 'Mã không tồn tại';
   }
+}
+
+/**
+ * Kiểm tra xem học sinh đã có bất kỳ thao tác trả lời nào trên một câu hỏi chưa
+ * (bao gồm cả trả lời một phần ở câu nối cặp, sắp xếp, dropdown, nhiều đáp án)
+ * để cảnh báo an toàn trước khi thoát phiên luyện tập / thi thử.
+ */
+export function hasAnyAnswerProgress(answer: UserAnswer | undefined | null): boolean {
+  if (answer === undefined || answer === null) {
+    return false;
+  }
+  if (typeof answer === 'string') {
+    return answer.trim().length > 0;
+  }
+  if (Array.isArray(answer)) {
+    return answer.some((item) => typeof item === 'string' && item.trim().length > 0);
+  }
+  if (typeof answer === 'object') {
+    return Object.values(answer).some(
+      (val) => typeof val === 'string' && val.trim().length > 0
+    );
+  }
+  return false;
 }

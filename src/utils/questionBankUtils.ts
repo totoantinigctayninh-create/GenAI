@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import {
   CERTIPORT_TOPICS,
   DropdownSubItem,
@@ -1029,7 +1028,8 @@ export function parseQuestionsFromExcelRows(rows: Record<string, unknown>[]): Qu
 /**
  * Tạo mảng byte `.xlsx` cho File Excel Mẫu (kèm sheet Hướng dẫn nhập liệu chi tiết)
  */
-export function buildSampleExcelWorkbookBytes(): Uint8Array {
+export async function buildSampleExcelWorkbookBytes(): Promise<Uint8Array> {
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
   const sampleRows = buildSampleExcelRows();
   const wsQuestions = XLSX.utils.json_to_sheet(sampleRows);
@@ -1096,7 +1096,10 @@ export function buildSampleExcelWorkbookBytes(): Uint8Array {
 /**
  * Xuất toàn bộ ngân hàng câu hỏi hiện tại ra mảng byte `.xlsx`
  */
-export function exportQuestionsToExcelBytes(questions: Question[]): Uint8Array {
+export async function exportQuestionsToExcelBytes(
+  questions: Question[]
+): Promise<Uint8Array> {
+  const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
   const rows = questionsToExcelRows(questions);
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -1120,7 +1123,10 @@ export function exportQuestionsToExcelBytes(questions: Question[]): Uint8Array {
 /**
  * Đọc mảng byte `.xlsx` và chuyển đổi thành danh sách `Question[]`
  */
-export function parseQuestionsFromExcelBytes(bytes: ArrayBuffer | Uint8Array): Question[] {
+export async function parseQuestionsFromExcelBytes(
+  bytes: ArrayBuffer | Uint8Array
+): Promise<Question[]> {
+  const XLSX = await import('xlsx');
   const wb = XLSX.read(bytes, { type: 'array' });
   const firstSheetName = wb.SheetNames[0];
   if (!firstSheetName) {

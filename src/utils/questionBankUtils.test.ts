@@ -93,11 +93,11 @@ test('serializeQuestionsToJson and parseQuestionsFromJson round-trip all questio
   }
 });
 
-test('SheetJS sample Excel (.xlsx) generation and parsing produces 5 valid Certiport questions', () => {
-  const bytes = buildSampleExcelWorkbookBytes();
+test('SheetJS sample Excel (.xlsx) generation and parsing produces 5 valid Certiport questions', async () => {
+  const bytes = await buildSampleExcelWorkbookBytes();
   assert.ok(bytes.byteLength > 1000);
 
-  const imported = parseQuestionsFromExcelBytes(bytes);
+  const imported = await parseQuestionsFromExcelBytes(bytes);
   assert.equal(imported.length, 5);
   assert.deepEqual(
     imported.map((q) => q.type),
@@ -109,14 +109,14 @@ test('SheetJS sample Excel (.xlsx) generation and parsing produces 5 valid Certi
   }
 });
 
-test('SheetJS exportQuestionsToExcelBytes and parseQuestionsFromExcelBytes round-trip questions including imageUrl', () => {
+test('SheetJS exportQuestionsToExcelBytes and parseQuestionsFromExcelBytes round-trip questions including imageUrl', async () => {
   const questionsWithImages = TEST_FIXTURE_QUESTIONS.map((q, idx) =>
     idx === 0
       ? applyImageToQuestion(q, 'https://example.com/certiport-diagram-1.png')
       : q
   );
-  const bytes = exportQuestionsToExcelBytes(questionsWithImages);
-  const reimported = parseQuestionsFromExcelBytes(bytes);
+  const bytes = await exportQuestionsToExcelBytes(questionsWithImages);
+  const reimported = await parseQuestionsFromExcelBytes(bytes);
   assert.equal(reimported.length, TEST_FIXTURE_QUESTIONS.length);
   assert.equal(reimported[0].imageUrl, 'https://example.com/certiport-diagram-1.png');
   for (const q of reimported) {

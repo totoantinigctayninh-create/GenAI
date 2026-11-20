@@ -197,8 +197,16 @@ test('evaluateViolationPolicy and doesViolationCountTowardLimit distinguish bloc
 });
 
 test('isSuspiciousSplitScreenResize detects split-screen window shrinking on desktop', () => {
+  // Toàn màn hình / kích thước chuẩn không bị cảnh báo
   assert.equal(isSuspiciousSplitScreenResize(1920, 1080, 1920, 1080), false);
+  assert.equal(isSuspiciousSplitScreenResize(1440, 900, 1440, 900), false);
+  // Chia đôi theo chiều ngang (viewportWidth < 72% baseline width) -> cảnh báo
   assert.equal(isSuspiciousSplitScreenResize(960, 1080, 1920, 1080), true);
+  assert.equal(isSuspiciousSplitScreenResize(720, 900, 1440, 900), true);
+  // Thu nhỏ theo chiều dọc (viewportHeight < 65% baseline height) -> cảnh báo
+  assert.equal(isSuspiciousSplitScreenResize(1440, 500, 1440, 900), true);
+  // Kiểm tra hồi quy: nếu truyền ngược tham số (base trước, cur sau) thì hàm sẽ trả về false
+  assert.equal(isSuspiciousSplitScreenResize(1440, 900, 720, 900), false);
   // Trên màn hình điện thoại nhỏ (<768px) không coi bàn phím ảo là chia đôi màn hình
   assert.equal(isSuspiciousSplitScreenResize(390, 400, 390, 844), false);
 });

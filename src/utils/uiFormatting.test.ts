@@ -6,6 +6,7 @@ import {
   formatVerifyCodeErrorMessage,
   getAvatarInitial,
   getShortTopicName,
+  hasAnyAnswerProgress,
   sanitizeLiveExamCodeInput,
 } from './uiFormatting';
 
@@ -55,4 +56,17 @@ test('formatVerifyCodeErrorMessage returns exact single-line error strings', () 
     formatVerifyCodeErrorMessage('rate_limited', 48),
     'Thử lại sau 48 giây'
   );
+});
+
+test('hasAnyAnswerProgress detects partial and complete answers across all answer shapes', () => {
+  assert.equal(hasAnyAnswerProgress(undefined), false);
+  assert.equal(hasAnyAnswerProgress(null), false);
+  assert.equal(hasAnyAnswerProgress(''), false);
+  assert.equal(hasAnyAnswerProgress('   '), false);
+  assert.equal(hasAnyAnswerProgress('A'), true);
+  assert.equal(hasAnyAnswerProgress([]), false);
+  assert.equal(hasAnyAnswerProgress(['A']), true);
+  assert.equal(hasAnyAnswerProgress({}), false);
+  assert.equal(hasAnyAnswerProgress({ p1: '', p2: '' }), false);
+  assert.equal(hasAnyAnswerProgress({ p1: 'Đáp án 1', p2: '' }), true);
 });

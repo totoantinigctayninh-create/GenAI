@@ -13,11 +13,13 @@ import {
   HelpCircle,
   Keyboard,
   Layers,
+  LogOut,
   PlayCircle,
   RotateCcw,
   Send,
   ShieldAlert,
   Shuffle,
+  SlidersHorizontal,
   XCircle,
 } from 'lucide-react';
 import { ThemeToggleButton } from '../context/ThemeContext';
@@ -42,8 +44,9 @@ import {
   getUserAnswerBreakdown,
   isQuestionAnswered,
 } from '../utils/scoring';
-import { getShortTopicName } from '../utils/uiFormatting';
+import { getShortTopicName, hasAnyAnswerProgress } from '../utils/uiFormatting';
 import { QuestionFontScale, QuestionRenderer } from './QuestionRenderer';
+import { MobileQuestionNavBar } from './MobileQuestionNavBar';
 import { formatStudyDuration } from './StudentPortal';
 
 interface MockExamViewProps {
@@ -58,6 +61,7 @@ interface MockExamViewProps {
   isFocusMode?: boolean;
   onToggleFocusMode?: () => void;
   onExamPhaseChange?: (inProgress: boolean) => void;
+  onAnsweredCountChange?: (answeredCount: number) => void;
 }
 
 type MockExamPhase = 'intro' | 'in_progress' | 'submitted';
@@ -75,6 +79,7 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
   isFocusMode = false,
   onToggleFocusMode,
   onExamPhaseChange,
+  onAnsweredCountChange,
 }) => {
   const [phase, setPhase] = useState<MockExamPhase>('intro');
   const [desiredQuestionCount, setDesiredQuestionCount] = useState<number>(
@@ -84,6 +89,7 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
   const [desiredTimeMinutes, setDesiredTimeMinutes] = useState<number>(50);
   const [elapsedExamSeconds, setElapsedExamSeconds] = useState<number>(0);
   const [isNavigatorCollapsed, setIsNavigatorCollapsed] = useState<boolean>(false);
+  const [showMobileTools, setShowMobileTools] = useState<boolean>(false);
   const [showRulesDetail, setShowRulesDetail] = useState<boolean>(false);
   const [showAllocationDetail, setShowAllocationDetail] = useState<boolean>(false);
 
@@ -97,6 +103,7 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
     MOCK_EXAM_DURATION_SECONDS
   );
   const [showConfirmSubmitModal, setShowConfirmSubmitModal] = useState<boolean>(false);
+  const [showExitConfirmModal, setShowExitConfirmModal] = useState<boolean>(false);
   const [autoSubmittedOnTimeout, setAutoSubmittedOnTimeout] = useState<boolean>(false);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilterType>('ALL');
   const [selectedReviewIndex, setSelectedReviewIndex] = useState<number>(0);
@@ -118,6 +125,64 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
     () => evaluateExamSet(examQuestions, userAnswers, flaggedMap),
     [examQuestions, userAnswers, flaggedMap]
   );
+
+  const touchedQuestionCount = useMemo(
+    () =>
+      examQuestions.reduce(
+        (acc, q) => acc + (hasAnyAnswerProgress(userAnswers[q.id]) ? 1 : 0),
+        0
+      ),
+    [examQuestions, userAnswers]
+  );
+
+  useEffect(() => {
+    onAnsweredCountChange?.(
+      phase === 'in_progress'
+        ? Math.max(evaluation.answeredCount, touchedQuestionCount)
+        : 0
+    );
+  }, [phase, evaluation.answeredCount, touchedQuestionCount, onAnsweredCountChange]);
+
+  const handleConfirmExitExam = useCallback(() => {
+    setShowExitConfirmModal(false);
+    setShowConfirmSubmitModal(false);
+    setShowMobileTools(false);
+    setUserAnswers({});
+    setFlaggedMap({});
+    setCurrentIndex(0);
+    setPhase('intro');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const handleRequestExitExam = useCallback(() => {
+    if (touchedQuestionCount > 0 || evaluation.answeredCount > 0) {
+      setShowExitConfirmModal(true);
+    } else {
+      handleConfirmExitExam();
+    }
+  }, [touchedQuestionCount, evaluation.answeredCount, handleConfirmExitExam]);
+
+  useEffect(() => {
+    if (!showExitConfirmModal) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowExitConfirmModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [showExitConfirmModal]);
+
+  useEffect(() => {
+    if (!showConfirmSubmitModal) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowConfirmSubmitModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [showConfirmSubmitModal]);
 
   // Bắt đầu bài thi thử mới: Bốc ngẫu nhiên theo đúng tỷ lệ Chuyên đề & Dạng câu hỏi trong Ngân hàng
   const handleStartNewMockExam = useCallback(() => {
@@ -352,7 +417,7 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                     parseInt(e.target.value, 10) || MOCK_EXAM_MAX_QUESTIONS
                   )
                 }
-                className="w-full h-11 px-3.5 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] text-[15px] font-medium text-[var(--color-text-primary)] cursor-pointer transition-colors duration-150"
+                className="w-full h-11 px-3.5 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] text-base sm:text-[15px] font-medium text-[var(--color-text-primary)] cursor-pointer transition-colors duration-150"
               >
                 {countOptions.map((cnt) => (
                   <option key={cnt} value={cnt}>
@@ -380,7 +445,7 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                 onChange={(e) =>
                   setDesiredTimeMinutes(parseInt(e.target.value, 10) || 0)
                 }
-                className="w-full h-11 px-3.5 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] text-[15px] font-medium text-[var(--color-text-primary)] cursor-pointer transition-colors duration-150"
+                className="w-full h-11 px-3.5 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] text-base sm:text-[15px] font-medium text-[var(--color-text-primary)] cursor-pointer transition-colors duration-150"
               >
                 <option value={50}>50 phút (chuẩn Certiport)</option>
                 <option value={30}>30 phút</option>
@@ -578,11 +643,14 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
       totalTimeSec > 0 && !isUnderFiveMinutes && timeRemainingRatio <= 35;
 
     return (
-      <div data-testid="mock-exam-focus-workspace" className="space-y-3">
+      <div
+        data-testid="mock-exam-focus-workspace"
+        className="space-y-3 pb-24 lg:pb-8"
+      >
         {/* Đồng hồ đếm ngược & Thanh điều khiển Phòng Thi Cố định góc trên (Floating Timer + Shrinking Progress Bar) */}
         <div
           data-testid="mock-exam-sticky-bar"
-          className={`sticky top-1.5 z-20 rounded-xl border overflow-hidden shadow-sm transition-all duration-200 ${
+          className={`sticky top-0 md:top-1.5 z-30 pt-[env(safe-area-inset-top)] md:pt-0 rounded-b-xl md:rounded-xl border overflow-hidden shadow-sm transition-all duration-200 ${
             isUnderFiveMinutes
               ? 'bg-rose-50/95 border-rose-400'
               : isWarningTime
@@ -590,12 +658,13 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                 : 'bg-white/95 backdrop-blur-xs border-slate-200/90'
           }`}
         >
-          <div className="px-3.5 py-2 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="px-3 py-1 rounded-full bg-teal-800 text-white text-[11px] font-extrabold tracking-wide tabular-nums">
-                PHÒNG THI CERTIPORT · CÂU {currentIndex + 1}/{examQuestions.length}
+          <div className="px-2 sm:px-3.5 py-2 flex items-center justify-between gap-1.5 sm:gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
+              <span className="px-2 sm:px-3 py-1 rounded-full bg-teal-800 text-white text-[10px] sm:text-[11px] font-extrabold tracking-wide tabular-nums whitespace-nowrap">
+                <span className="hidden sm:inline">PHÒNG THI CERTIPORT · </span>
+                CÂU {currentIndex + 1}/{examQuestions.length}
               </span>
-              <span className="text-xs font-medium text-slate-700 tabular-nums">
+              <span className="hidden md:inline text-xs font-medium text-slate-700 tabular-nums">
                 Đã làm:{' '}
                 <strong className="font-mono text-teal-800">
                   {evaluation.answeredCount}/{examQuestions.length}
@@ -611,71 +680,71 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
               </span>
             </div>
 
-            {/* Bộ công cụ Tối ưu Quan sát (Cỡ chữ A-/A/A+, Sáng/Tối, Ẩn/Hiện Bảng câu hỏi, Chế độ Tập trung) + Đồng hồ */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              {/* Tùy chỉnh cỡ chữ đề thi */}
-              {onChangeFontScale && (
-                <div
-                  className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]"
-                  role="group"
-                  aria-label="Chỉnh cỡ chữ đề thi"
+            {/* Bộ công cụ Tối ưu Quan sát (gọn trên mobile, đầy đủ trên md+) + Đồng hồ + Nộp bài */}
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+              {/* Công cụ phụ hiện trực tiếp trên desktop/tablet (md+) */}
+              <div className="hidden md:flex items-center gap-1.5">
+                {onChangeFontScale && (
+                  <div
+                    className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]"
+                    role="group"
+                    aria-label="Chỉnh cỡ chữ đề thi"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onChangeFontScale('normal')}
+                      className={`px-1.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
+                        fontScale === 'normal'
+                          ? 'bg-white text-teal-800 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      A-
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onChangeFontScale('large')}
+                      className={`px-1.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
+                        fontScale === 'large'
+                          ? 'bg-white text-teal-800 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      A
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onChangeFontScale('xlarge')}
+                      className={`px-1.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
+                        fontScale === 'xlarge'
+                          ? 'bg-white text-teal-800 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      A+
+                    </button>
+                  </div>
+                )}
+
+                <ThemeToggleButton
+                  variant="compact"
+                  testId="exam-zen-theme-toggle"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setIsNavigatorCollapsed((prev) => !prev)}
+                  className="hidden lg:inline-flex px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 transition-colors cursor-pointer"
                 >
-                  <button
-                    type="button"
-                    onClick={() => onChangeFontScale('normal')}
-                    className={`px-1.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
-                      fontScale === 'normal'
-                        ? 'bg-white text-teal-800 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    A-
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onChangeFontScale('large')}
-                    className={`px-1.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
-                      fontScale === 'large'
-                        ? 'bg-white text-teal-800 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    A
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onChangeFontScale('xlarge')}
-                    className={`px-1.5 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
-                      fontScale === 'xlarge'
-                        ? 'bg-white text-teal-800 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    A+
-                  </button>
-                </div>
-              )}
-
-              {/* Nút Chuyển đổi Sáng/Tối ngay trong Phòng Thi Thử */}
-              <ThemeToggleButton
-                variant="compact"
-                testId="exam-zen-theme-toggle"
-              />
-
-              {/* Nút Mở rộng / Thu gọn bảng danh sách câu hỏi */}
-              <button
-                type="button"
-                onClick={() => setIsNavigatorCollapsed((prev) => !prev)}
-                className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 transition-colors cursor-pointer"
-              >
-                {isNavigatorCollapsed
-                  ? 'Hiện bảng số'
-                  : 'Mở rộng đề'}
-              </button>
+                  {isNavigatorCollapsed
+                    ? 'Hiện bảng số'
+                    : 'Mở rộng đề'}
+                </button>
+              </div>
 
               <div
                 data-testid="mock-exam-countdown"
-                className={`px-3 py-1 rounded-lg font-mono text-xs font-bold tabular-nums inline-flex items-center gap-1.5 transition-all duration-200 ${
+                className={`px-2 sm:px-3 py-1 rounded-lg font-mono text-[11px] sm:text-xs font-bold tabular-nums inline-flex items-center gap-1 sm:gap-1.5 transition-all duration-200 ${
                   isUnderFiveMinutes
                     ? 'bg-rose-500 text-white ring-2 ring-rose-300 animate-pulse'
                     : isWarningTime
@@ -683,30 +752,113 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                       : 'bg-slate-900 text-white'
                 }`}
               >
-                <Clock className="w-3.5 h-3.5 shrink-0" />
+                <Clock className="w-3 sm:w-3.5 h-3 sm:h-3.5 shrink-0" />
                 <span>
                   {desiredTimeMinutes > 0
-                    ? `Còn: ${formatCountdownClock(remainingSeconds)}`
-                    : `∞ Tự do · ${formatCountdownClock(elapsedExamSeconds)}`}
+                    ? formatCountdownClock(remainingSeconds)
+                    : `∞ ${formatCountdownClock(elapsedExamSeconds)}`}
                 </span>
                 {isUnderFiveMinutes && (
-                  <span className="text-[10px] bg-white text-rose-700 px-1.5 py-0.5 rounded-full font-sans font-extrabold">
+                  <span className="hidden sm:inline text-[10px] bg-white text-rose-700 px-1.5 py-0.5 rounded-full font-sans font-extrabold">
                     &lt; 5 PHÚT!
                   </span>
                 )}
               </div>
 
+              {/* Nút mở menu công cụ phụ trên điện thoại (< md) */}
+              <button
+                type="button"
+                data-testid="mock-exam-mobile-tools-btn"
+                aria-label="Mở công cụ hiển thị"
+                aria-expanded={showMobileTools}
+                onClick={() => setShowMobileTools((prev) => !prev)}
+                className={`md:hidden min-w-[34px] min-h-[34px] px-1.5 rounded-lg border inline-flex items-center justify-center transition-colors cursor-pointer ${
+                  showMobileTools
+                    ? 'border-teal-600 bg-teal-50 text-teal-800'
+                    : 'border-slate-300 bg-white text-slate-700'
+                }`}
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+              </button>
+
               <button
                 type="button"
                 data-testid="open-submit-modal-btn"
                 onClick={() => setShowConfirmSubmitModal(true)}
-                className="px-3.5 py-1 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold transition-all duration-200 inline-flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                className="min-h-[34px] sm:min-h-[36px] px-2 sm:px-3.5 py-1 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-[11px] sm:text-xs font-bold transition-all duration-200 inline-flex items-center gap-1 sm:gap-1.5 shadow-2xs cursor-pointer"
               >
                 <Send className="w-3.5 h-3.5" />
                 <span>Nộp bài</span>
               </button>
+
+              <button
+                type="button"
+                data-testid="mock-exam-exit-btn"
+                onClick={handleRequestExitExam}
+                aria-label="Thoát phòng thi thử"
+                className="min-w-[34px] min-h-[34px] sm:min-h-[36px] px-1.5 sm:px-2.5 py-1 rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-600 hover:text-white hover:border-rose-600 text-rose-700 text-xs font-bold transition-colors inline-flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Thoát</span>
+              </button>
             </div>
           </div>
+
+          {/* Ngăn công cụ phụ gọn cho mobile (< md) */}
+          {showMobileTools && (
+            <div className="md:hidden px-3 py-2 border-t border-slate-200/80 bg-slate-50/90 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="text-slate-700 font-medium tabular-nums">
+                Đã làm <strong>{evaluation.answeredCount}/{examQuestions.length}</strong> · Cờ <strong>{evaluation.flaggedCount}</strong>
+              </span>
+              <div className="flex items-center gap-2">
+                {onChangeFontScale && (
+                  <div
+                    className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 text-xs"
+                    role="group"
+                    aria-label="Chỉnh cỡ chữ đề thi"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onChangeFontScale('normal')}
+                      className={`px-2 py-1 rounded-md font-bold cursor-pointer ${
+                        fontScale === 'normal'
+                          ? 'bg-teal-50 text-teal-800'
+                          : 'text-slate-600'
+                      }`}
+                    >
+                      A-
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onChangeFontScale('large')}
+                      className={`px-2 py-1 rounded-md font-bold cursor-pointer ${
+                        fontScale === 'large'
+                          ? 'bg-teal-50 text-teal-800'
+                          : 'text-slate-600'
+                      }`}
+                    >
+                      A
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onChangeFontScale('xlarge')}
+                      className={`px-2 py-1 rounded-md font-bold cursor-pointer ${
+                        fontScale === 'xlarge'
+                          ? 'bg-teal-50 text-teal-800'
+                          : 'text-slate-600'
+                      }`}
+                    >
+                      A+
+                    </button>
+                  </div>
+                )}
+                <ThemeToggleButton
+                  variant="compact"
+                  testId="exam-zen-theme-toggle-mobile"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Thanh tiến trình thời gian thu hẹp dần (Shrinking Time Progress Bar) */}
           <div className="h-1.5 w-full bg-slate-100 overflow-hidden">
@@ -758,7 +910,7 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
 
                 {/* Thanh điều hướng câu hỏi & Nút Gắn cờ xem lại (Mark for Review) gọn */}
                 <div className="bg-white border border-slate-200/80 rounded-2xl px-4 py-2.5 shadow-2xs flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="hidden lg:flex items-center gap-2">
                     <button
                       type="button"
                       disabled={currentIndex === 0}
@@ -817,11 +969,11 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
             )}
           </div>
 
-          {/* Cột phải: Bảng Điều hướng Ma trận Câu hỏi (Question Matrix Navigator 1 -> N) */}
+          {/* Cột phải: Bảng Điều hướng Ma trận Câu hỏi (Desktop lg+) */}
           {!isNavigatorCollapsed && (
             <aside
               data-testid="mock-exam-question-navigator"
-              className="w-full lg:w-64 shrink-0 bg-white border border-slate-200/80 rounded-2xl p-3.5 shadow-sm space-y-3 sticky top-16"
+              className="hidden lg:block w-full lg:w-64 shrink-0 bg-white border border-slate-200/80 rounded-2xl p-3.5 shadow-sm space-y-3 sticky top-16"
             >
               <div className="flex items-center justify-between gap-1">
                 <h3 className="text-xs font-extrabold text-slate-900">
@@ -912,94 +1064,191 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
           )}
         </div>
 
-        {/* Hộp thoại Xác nhận Nộp bài & Cảnh báo nếu còn câu chưa làm */}
+        {/* Thanh điều hướng cố định đáy màn hình & Ngăn kéo lưới câu hỏi cho Mobile/Tablet (< lg) */}
+        <MobileQuestionNavBar
+          testIdPrefix="mock-exam"
+          currentIndex={currentIndex}
+          totalQuestions={examQuestions.length}
+          summaryText={`Đã làm ${evaluation.answeredCount}/${examQuestions.length}`}
+          flaggedCount={evaluation.flaggedCount}
+          sheetTitle={`Ma trận câu hỏi (1 → ${examQuestions.length})`}
+          legendItems={[
+            {
+              key: 'current',
+              label: `Đang làm (#${currentIndex + 1})`,
+              swatchClassName: 'bg-white border-2 border-teal-600',
+            },
+            {
+              key: 'answered',
+              label: `Đã làm (${evaluation.answeredCount})`,
+              swatchClassName: 'bg-teal-700',
+            },
+            {
+              key: 'unanswered',
+              label: `Chưa làm (${evaluation.unansweredCount})`,
+              swatchClassName: 'bg-white border border-slate-300',
+            },
+            {
+              key: 'flagged',
+              label: `Gắn cờ (${evaluation.flaggedCount})`,
+              isFlag: true,
+            },
+          ]}
+          items={examQuestions.map((q, idx) => {
+            const isCurrent = idx === currentIndex;
+            const answered = isQuestionAnswered(q, userAnswers[q.id]);
+            const flagged = Boolean(flaggedMap[q.id]);
+
+            let cellClassName =
+              'bg-slate-50 border-slate-200 text-slate-700 hover:border-teal-600';
+            if (flagged) {
+              cellClassName =
+                'bg-amber-50 border-amber-400 text-amber-900 font-bold';
+            } else if (answered) {
+              cellClassName =
+                'bg-teal-700 border-teal-700 text-white font-bold shadow-2xs';
+            }
+            if (isCurrent) {
+              cellClassName += ' ring-2 ring-teal-600 ring-offset-1 font-extrabold';
+            }
+
+            return {
+              id: q.id,
+              index: idx,
+              label: String(idx + 1),
+              ariaLabel: `Chuyển đến câu ${idx + 1}${
+                flagged
+                  ? ' (Đang gắn cờ xem lại)'
+                  : answered
+                    ? ' (Đã trả lời)'
+                    : ' (Chưa làm)'
+              }`,
+              cellClassName,
+              isCurrent,
+              isFlagged: flagged,
+              dataAnswered: answered,
+            };
+          })}
+          onPrev={() => setCurrentIndex((i) => Math.max(0, i - 1))}
+          onNext={() =>
+            setCurrentIndex((i) => Math.min(examQuestions.length - 1, i + 1))
+          }
+          onSelectIndex={(idx) => setCurrentIndex(idx)}
+          footerAction={
+            <button
+              type="button"
+              onClick={() => setShowConfirmSubmitModal(true)}
+              className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold transition-colors inline-flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Send className="w-4 h-4" />
+              <span>Hoàn tất &amp; Nộp bài thi</span>
+            </button>
+          }
+        />
+
+        {/* Hộp thoại Xác nhận Nộp bài & Cảnh báo nếu còn câu chưa làm (Ghim cố định nút Nộp bài, cuộn mượt danh sách câu chưa làm trên điện thoại) */}
         {showConfirmSubmitModal && (
           <div
+            data-testid="mock-exam-submit-confirm-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="confirm-submit-title"
-            className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setShowConfirmSubmitModal(false);
+              }
+            }}
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-[1px] flex items-end sm:items-center justify-center p-2 sm:p-4"
           >
-            <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 shadow-xl space-y-5">
-              <div className="space-y-1.5">
-                <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-800">
-                  <Send className="w-4 h-4" />
+            <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-2xl max-w-lg w-full max-h-[88dvh] flex flex-col overflow-hidden shadow-xl">
+              {/* Phần đầu cố định */}
+              <div className="shrink-0 px-4 sm:px-6 pt-4 sm:pt-5 pb-3 border-b border-[var(--color-border-subtle)] space-y-1">
+                <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-800 dark:text-teal-300">
+                  <Send className="w-4 h-4 shrink-0" />
                   <span>Xác nhận Nộp bài Thi thử Certiport</span>
                 </div>
                 <h3
                   id="confirm-submit-title"
-                  className="text-lg font-bold text-slate-900"
+                  className="text-base sm:text-lg font-bold text-[var(--color-text-primary)]"
                 >
                   Bạn có chắc chắn muốn nộp bài thi ngay bây giờ?
                 </h3>
               </div>
 
-              {/* Bảng tóm tắt trạng thái làm bài trước khi nộp */}
-              <div className="grid grid-cols-3 gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-center tabular-nums">
-                <div>
-                  <div className="text-xs text-slate-500">Đã trả lời</div>
-                  <div className="text-lg font-bold font-mono text-teal-800">
-                    {evaluation.answeredCount}/{examQuestions.length}
+              {/* Phần nội dung giữa cuộn độc lập để không bao giờ che mất nút Xác nhận Nộp bài */}
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-4 space-y-4">
+                {/* Bảng tóm tắt trạng thái làm bài trước khi nộp */}
+                <div className="grid grid-cols-3 gap-2.5 sm:gap-3 p-3 sm:p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-center tabular-nums">
+                  <div>
+                    <div className="text-xs text-slate-500">Đã trả lời</div>
+                    <div className="text-base sm:text-lg font-bold font-mono text-teal-800">
+                      {evaluation.answeredCount}/{examQuestions.length}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Chưa làm</div>
+                    <div className="text-base sm:text-lg font-bold font-mono text-rose-700">
+                      {evaluation.unansweredCount}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500">Đang gắn cờ</div>
+                    <div className="text-base sm:text-lg font-bold font-mono text-amber-700">
+                      {evaluation.flaggedCount}
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs text-slate-500">Chưa làm</div>
-                  <div className="text-lg font-bold font-mono text-rose-700">
-                    {evaluation.unansweredCount}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Đang gắn cờ</div>
-                  <div className="text-lg font-bold font-mono text-amber-700">
-                    {evaluation.flaggedCount}
-                  </div>
-                </div>
-              </div>
 
-              {/* Cảnh báo nổi bật nếu còn câu chưa làm */}
-              {unansweredIndices.length > 0 ? (
-                <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 space-y-2.5">
-                  <div className="flex items-start gap-2 text-xs sm:text-sm font-bold text-amber-950">
-                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                {/* Cảnh báo nổi bật nếu còn câu chưa làm */}
+                {unansweredIndices.length > 0 ? (
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-amber-50 border border-amber-300 space-y-2.5">
+                    <div className="flex items-start gap-2 text-xs sm:text-sm font-bold text-amber-950">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                      <span>
+                        Cảnh báo: Bạn còn {unansweredIndices.length} câu hỏi chưa hoàn thành! Các
+                        câu bỏ trống sẽ bị tính 0 điểm.
+                      </span>
+                    </div>
+                    <div className="text-xs text-amber-900">
+                      Bấm vào số câu bên dưới để quay lại làm nốt trước khi nộp (cuộn để xem thêm):
+                    </div>
+                    <div
+                      data-testid="mock-exam-unanswered-list"
+                      className="flex flex-wrap gap-1.5 max-h-40 sm:max-h-48 overflow-y-auto overscroll-contain pr-1"
+                    >
+                      {unansweredIndices.map((idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setCurrentIndex(idx);
+                            setShowConfirmSubmitModal(false);
+                          }}
+                          className="min-h-[34px] px-2.5 py-1 rounded-md bg-white border border-amber-400 text-xs font-mono font-bold text-amber-900 hover:bg-amber-100 cursor-pointer"
+                        >
+                          Câu {idx + 1}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs sm:text-sm font-medium text-emerald-900 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>
-                      Cảnh báo: Bạn còn {unansweredIndices.length} câu hỏi chưa hoàn thành! Các
-                      câu bỏ trống sẽ bị tính 0 điểm.
+                      Bạn đã hoàn thành đầy đủ {examQuestions.length}/{examQuestions.length} câu
+                      hỏi trong đề thi.
                     </span>
                   </div>
-                  <div className="text-xs text-amber-900">
-                    Bấm vào số câu bên dưới để quay lại làm nốt trước khi nộp:
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {unansweredIndices.map((idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          setCurrentIndex(idx);
-                          setShowConfirmSubmitModal(false);
-                        }}
-                        className="px-2.5 py-1 rounded-md bg-white border border-amber-400 text-xs font-mono font-bold text-amber-900 hover:bg-amber-100 cursor-pointer"
-                      >
-                        Câu {idx + 1}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs sm:text-sm font-medium text-emerald-900 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>
-                    Bạn đã hoàn thành đầy đủ {examQuestions.length}/{examQuestions.length} câu
-                    hỏi trong đề thi.
-                  </span>
-                </div>
-              )}
+                )}
+              </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
+              {/* Thanh nút hành động ghim cố định dưới đáy modal — luôn bấm được ngay trên mọi màn hình điện thoại */}
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5">
                 <button
                   type="button"
+                  data-testid="cancel-submit-exam-btn"
                   onClick={() => setShowConfirmSubmitModal(false)}
-                  className="px-4 py-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                  className="min-h-[44px] w-full sm:w-auto px-4 py-2.5 rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] hover:bg-slate-50 text-sm font-semibold text-[var(--color-text-primary)] cursor-pointer"
                 >
                   Quay lại kiểm tra bài
                 </button>
@@ -1007,9 +1256,67 @@ export const MockExamView: React.FC<MockExamViewProps> = ({
                   type="button"
                   data-testid="confirm-submit-exam-btn"
                   onClick={() => finalizeAndSubmitExam(false)}
-                  className="px-5 py-2.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs sm:text-sm font-bold cursor-pointer"
+                  className="min-h-[44px] w-full sm:w-auto px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-sm font-bold cursor-pointer"
                 >
-                  Xác nhận Nộp bài & Chấm điểm
+                  Xác nhận Nộp bài &amp; Chấm điểm
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Hộp thoại Xác nhận Thoát bài thi thử khi đã trả lời ít nhất 1 câu */}
+        {showExitConfirmModal && (
+          <div
+            data-testid="mock-exam-exit-confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mock-exam-exit-confirm-title"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setShowExitConfirmModal(false);
+              }
+            }}
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-[1px] flex items-center justify-center p-4"
+          >
+            <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-xl space-y-4">
+              <div className="flex items-start gap-3">
+                <span className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </span>
+                <div className="space-y-1 min-w-0">
+                  <h3
+                    id="mock-exam-exit-confirm-title"
+                    className="text-base font-bold text-[var(--color-text-primary)]"
+                  >
+                    Thoát bài thi thử chưa hoàn thành?
+                  </h3>
+                  <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+                    Bạn đã làm{' '}
+                    <strong className="font-mono text-[var(--color-text-primary)]">
+                      {Math.max(evaluation.answeredCount, touchedQuestionCount)}/{examQuestions.length}
+                    </strong>{' '}
+                    câu hỏi. Nếu thoát lúc này, bài làm chưa nộp sẽ không được lưu.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  data-testid="mock-exam-exit-cancel-btn"
+                  onClick={() => setShowExitConfirmModal(false)}
+                  className="min-h-[42px] px-4 py-2 rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] hover:bg-slate-50 text-sm font-semibold text-[var(--color-text-primary)] cursor-pointer"
+                >
+                  Tiếp tục làm bài
+                </button>
+                <button
+                  type="button"
+                  data-testid="mock-exam-exit-confirm-btn"
+                  onClick={handleConfirmExitExam}
+                  className="min-h-[42px] px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold cursor-pointer"
+                >
+                  Thoát không nộp bài
                 </button>
               </div>
             </div>

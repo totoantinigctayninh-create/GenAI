@@ -289,13 +289,12 @@ export async function resetSeedDataToDefault(): Promise<void> {
 }
 
 /**
- * Xác thực người dùng bằng Mã định danh (Username/Student ID) và Mật khẩu qua collection `users`
- * Có hỗ trợ fallback sang danh sách `knownUsers` / `SEED_USERS` khi mạng chậm hoặc ngoại tuyến
+ * Xác thực người dùng bằng Mã định danh (Username/Student ID) và Mật khẩu trực tiếp qua collection `users` trên Firestore
  */
 export async function authenticateWithUsernamePassword(
   usernameInput: string,
   passwordInput: string,
-  knownUsers: UserAccount[] = SEED_USERS
+  knownUsers: UserAccount[] = []
 ): Promise<UserAccount> {
   const cleanId = usernameInput.trim();
   const cleanPass = passwordInput.trim();
@@ -324,11 +323,11 @@ export async function authenticateWithUsernamePassword(
     handleFirestoreError(error, OperationType.GET, `users/${cleanId}`);
   }
 
-  if (!matchedUser) {
-    const localFallback =
-      knownUsers.find((u) => u.username.toLowerCase() === cleanId.toLowerCase()) ??
-      SEED_USERS.find((u) => u.username.toLowerCase() === cleanId.toLowerCase());
-    if (localFallback) {
+  if (!matchedUser && knownUsers.length > 0) {
+    const localFallback = knownUsers.find(
+      (u) => u.username.toLowerCase() === cleanId.toLowerCase()
+    );
+    if (localFallback && localFallback.password) {
       matchedUser = localFallback;
     }
   }
@@ -402,19 +401,8 @@ export async function toggleQuestionBookmarkInFirestore(
   const path = `users/${userId}`;
   try {
     const snap = await getDoc(doc(db, 'users', userId));
-    const seedDefault = SEED_USERS.find((u) => u.id === userId);
-    const current: UserAccount = snap.exists()
-      ? (snap.data() as UserAccount)
-      : (seedDefault ?? {
-          id: userId,
-          username: userId,
-          password: '123456',
-          fullName: userId,
-          role: 'student',
-          lastLogin: new Date().toISOString(),
-          status: 'studying',
-          totalStudyMinutes: 0,
-        });
+    if (!snap.exists()) return [];
+    const current = snap.data() as UserAccount;
 
     const existingBookmarks = Array.isArray(current.bookmarkedQuestions)
       ? current.bookmarkedQuestions
@@ -451,19 +439,8 @@ export async function recordQuestionPracticeResultInFirestore(
   const path = `users/${userId}`;
   try {
     const snap = await getDoc(doc(db, 'users', userId));
-    const seedDefault = SEED_USERS.find((u) => u.id === userId);
-    const current: UserAccount = snap.exists()
-      ? (snap.data() as UserAccount)
-      : (seedDefault ?? {
-          id: userId,
-          username: userId,
-          password: '123456',
-          fullName: userId,
-          role: 'student',
-          lastLogin: new Date().toISOString(),
-          status: 'studying',
-          totalStudyMinutes: 0,
-        });
+    if (!snap.exists()) return;
+    const current = snap.data() as UserAccount;
 
     const currentWrong = Array.isArray(current.wrongQuestions) ? current.wrongQuestions : [];
     const currentMastered = Array.isArray(current.masteredQuestions)
@@ -630,8 +607,12 @@ export async function saveStudentAccount(account: UserAccount): Promise<void> {
  * Lưu hoặc cập nhật Logo Tổ Toán - Tin · Trường IGC Tây Ninh lên Firestore
  * (lưu đồng thời vào doc chuyên biệt `users/__department_logo__` và `users/admin` để đồng bộ mọi máy tính/trình duyệt)
  */
-export async function updateDepartmentLogoInFirestore(logoUrl: string): Promise<void> {
+export async function updateDepartmentLogoInFirestore(
+  logoUrl: string,
+  options?: { isOfficialDefault?: boolean }
+): Promise<void> {
   const cleaned = logoUrl.trim();
+  const isOfficialDefault = Boolean(options?.isOfficialDefault);
   const brandingPath = `users/${DEPARTMENT_BRANDING_DOC_ID}`;
   const adminPath = `users/${DEFAULT_ADMIN_ACCOUNT.id}`;
 
@@ -651,6 +632,7 @@ export async function updateDepartmentLogoInFirestore(logoUrl: string): Promise<
         totalStudySeconds: 0,
         lastLogin: new Date().toISOString(),
         logoUrl: cleaned,
+        logoIsOfficialDefault: isOfficialDefault,
       },
       { merge: true }
     );
@@ -685,20 +667,26 @@ export async function updateDepartmentLogoInFirestore(logoUrl: string): Promise<
  * Lắng nghe thời gian thực Logo Tổ Toán - Tin từ Firestore trên mọi máy tính và trình duyệt
  */
 export function subscribeToDepartmentLogo(
-  onLogoChange: (logoUrl: string | undefined) => void
+  onLogoChange: (
+    logoUrl: string | undefined,
+    isOfficialDefault?: boolean
+  ) => void
 ): () => void {
   let brandingLogo: string | undefined;
+  let brandingIsOfficialDefault = false;
   let adminLogo: string | undefined;
   let brandingLoaded = false;
   let adminLoaded = false;
 
   const emitResolvedLogo = () => {
+    const hasBranding = Boolean(brandingLogo && brandingLogo.trim());
     const resolved =
-      (brandingLogo && brandingLogo.trim()) ||
+      (hasBranding ? brandingLogo!.trim() : undefined) ||
       (adminLogo && adminLogo.trim()) ||
       undefined;
+    const isOfficialDefault = hasBranding ? brandingIsOfficialDefault : false;
     if (resolved || (brandingLoaded && adminLoaded)) {
-      onLogoChange(resolved);
+      onLogoChange(resolved, isOfficialDefault);
     }
   };
 
@@ -707,13 +695,17 @@ export function subscribeToDepartmentLogo(
     (snap) => {
       brandingLoaded = true;
       if (snap.exists()) {
-        const data = snap.data() as UserAccount;
+        const data = snap.data() as UserAccount & {
+          logoIsOfficialDefault?: boolean;
+        };
         brandingLogo =
           typeof data.logoUrl === 'string' && data.logoUrl.trim()
             ? data.logoUrl.trim()
             : undefined;
+        brandingIsOfficialDefault = Boolean(data.logoIsOfficialDefault);
       } else {
         brandingLogo = undefined;
+        brandingIsOfficialDefault = false;
       }
       emitResolvedLogo();
     },
