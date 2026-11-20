@@ -19,6 +19,7 @@ import type {
   SessionRealtimeEvent,
   StudentAttemptPaperPayload,
   StudentAttemptResultPayload,
+  StudentAttemptStatusPayload,
   TeacherAttemptQuestionDetail,
   TeacherLiveNotEnteredStudent,
   TeacherSessionDetailPayload,
@@ -288,6 +289,14 @@ export class ExamSessionEngine {
     this.nowFn = options.nowFn ?? (() => new Date());
     this.randomFn = options.randomFn ?? Math.random;
     this.storageAdapter = options.storageAdapter;
+  }
+
+  /**
+   * Trả về nhanh trạng thái hiện tại của ca thi (`draft` | `open` | `locked` | `ended`)
+   * để bộ điều tiết SSE nhận diện sự kiện khóa/kết thúc ca thi ngay lập tức.
+   */
+  public getSessionStatus(sessionId: string): ExamSessionStatus | undefined {
+    return this.sessions.get(sessionId)?.status;
   }
 
   /**
@@ -2529,6 +2538,31 @@ export class ExamSessionEngine {
       session,
       attempt.activeSessionToken || sessionToken || ''
     );
+  }
+
+  /**
+   * Trả về trạng thái gọn nhẹ (~200 byte) của lượt thi để đồng bộ đồng hồ, hạn nộp
+   * và số lần vi phạm định kỳ mà không cần truyền lại toàn bộ 40–50 câu hỏi đề thi.
+   */
+  public getAttemptStatus(
+    studentInput: string | UserAccount,
+    attemptId: string,
+    sessionToken?: string
+  ): StudentAttemptStatusPayload {
+    const { attempt, session } = this.requireStudentAttemptOwnership(
+      studentInput,
+      attemptId,
+      sessionToken
+    );
+
+    return {
+      status: attempt.status,
+      serverNow: this.nowIso(),
+      deadlineAt: attempt.deadlineAt,
+      violationCount: attempt.violationCount,
+      maxViolations: session.maxViolations,
+      sessionStatus: session.status,
+    };
   }
 
   /**

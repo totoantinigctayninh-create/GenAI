@@ -28,6 +28,7 @@ import {
   SessionRealtimeEvent,
   StudentAttemptPaperPayload,
   StudentAttemptResultPayload,
+  StudentAttemptStatusPayload,
   TeacherSessionDetailPayload,
   VerifyCodeResult,
   ViolationEventRecord,
@@ -140,6 +141,7 @@ let pendingFallbackUsers: UserAccount[] = [];
 let pendingFallbackQuestions: Question[] = [];
 let currentAuthToken: string | null = loadStoredAuthToken();
 let serverApiUnavailable = false;
+let remoteSyncContextTimer: number | null = null;
 
 function createClientStorageAdapter(): ExamStorageAdapter {
   const localState = loadLocalEngineSnapshot();
@@ -622,6 +624,10 @@ export const examSessionApi = {
   clearAuthToken(): void {
     currentAuthToken = null;
     activeProfileContext = null;
+    if (remoteSyncContextTimer !== null && typeof window !== 'undefined') {
+      window.clearTimeout(remoteSyncContextTimer);
+      remoteSyncContextTimer = null;
+    }
     persistStoredAuthToken(null);
   },
 
@@ -767,14 +773,33 @@ export const examSessionApi = {
   },
 
   /**
-   * Đồng bộ tài khoản đang đăng nhập, danh sách người dùng và ngân hàng câu hỏi.
-   * Chỉ tài khoản giáo viên có mã phiên HMAC hợp lệ mới được phép gửi đồng bộ lên máy chủ Express.
+   * Hủy tác vụ gửi đồng bộ ngữ cảnh đang chờ (khi đăng xuất hoặc ngắt phiên).
    */
-  syncContext(context: {
-    currentUser?: UserAccount | null;
-    users?: UserAccount[];
-    questions?: Question[];
-  }): void {
+  cancelPendingRemoteContextSync(): void {
+    if (remoteSyncContextTimer !== null) {
+      window.clearTimeout(remoteSyncContextTimer);
+      remoteSyncContextTimer = null;
+    }
+  },
+
+  /**
+   * Đồng bộ tài khoản đang đăng nhập, danh sách người dùng và ngân hàng câu hỏi.
+   * - Luôn cập nhật bộ nhớ đệm nội bộ cục bộ (không gửi yêu cầu mạng).
+   * - Chỉ gửi `POST /api/exam-sessions/sync-context` (debounce tối thiểu 5000ms)
+   *   khi tài khoản là giáo viên có mã phiên HMAC hợp lệ VÀ `options.syncRemote === true`
+   *   (tức khi câu hỏi hoặc thông tin định danh tài khoản thực sự thay đổi).
+   */
+  syncContext(
+    context: {
+      currentUser?: UserAccount | null;
+      users?: UserAccount[];
+      questions?: Question[];
+    },
+    options?: {
+      syncRemote?: boolean;
+      debounceMs?: number;
+    }
+  ): void {
     if (context.currentUser) {
       activeProfileContext = context.currentUser;
       clientEngineInstance?.upsertUser(context.currentUser);
@@ -794,6 +819,10 @@ export const examSessionApi = {
       }
     }
 
+    if (!options?.syncRemote) {
+      return;
+    }
+
     const token = this.getAuthToken();
     if (
       typeof window !== 'undefined' &&
@@ -801,26 +830,36 @@ export const examSessionApi = {
       isTeacher &&
       token
     ) {
-      void fetch('/api/exam-sessions/sync-context', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          currentUser: context.currentUser ?? undefined,
-          users: context.users,
-          questions: context.questions,
-        }),
-      })
-        .then((res) => {
-          if (res.status === 404) {
-            serverApiUnavailable = true;
-          }
+      const payloadToSend = {
+        currentUser: context.currentUser ?? undefined,
+        users: context.users,
+        questions: context.questions,
+      };
+      const delayMs = Math.max(5000, options.debounceMs ?? 5000);
+      if (remoteSyncContextTimer !== null) {
+        window.clearTimeout(remoteSyncContextTimer);
+      }
+      remoteSyncContextTimer = window.setTimeout(() => {
+        remoteSyncContextTimer = null;
+        const latestToken = this.getAuthToken();
+        if (!latestToken || serverApiUnavailable) return;
+        void fetch('/api/exam-sessions/sync-context', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${latestToken}`,
+          },
+          body: JSON.stringify(payloadToSend),
         })
-        .catch(() => {
-          serverApiUnavailable = true;
-        });
+          .then((res) => {
+            if (res.status === 404) {
+              serverApiUnavailable = true;
+            }
+          })
+          .catch(() => {
+            serverApiUnavailable = true;
+          });
+      }, delayMs);
     }
   },
 
@@ -1163,6 +1202,21 @@ export const examSessionApi = {
       (engine) => ({
         ok: true,
         ...engine.getAttemptPaper(studentId, attemptId, sessionToken),
+      })
+    );
+  },
+
+  getAttemptStatus(studentId: string, attemptId: string, sessionToken: string) {
+    return apiRequest<{ ok: true } & StudentAttemptStatusPayload>(
+      `/api/exam-attempts/${encodeURIComponent(attemptId)}/status`,
+      {
+        userId: studentId,
+        roleHint: 'student',
+        sessionToken,
+      },
+      (engine) => ({
+        ok: true,
+        ...engine.getAttemptStatus(studentId, attemptId, sessionToken),
       })
     );
   },

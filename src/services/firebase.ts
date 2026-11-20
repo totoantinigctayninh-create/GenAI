@@ -10,8 +10,10 @@ import {
   getFirestore,
   initializeFirestore,
   onSnapshot,
+  query,
   setDoc,
   setLogLevel,
+  where,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import {
@@ -935,6 +937,163 @@ export function subscribeToQuestions(onData: (questions: Question[]) => void): (
       handleFirestoreError(error, OperationType.LIST, 'questions');
     }
   );
+}
+
+/**
+ * Lắng nghe duy nhất 1 tài liệu tài khoản trong `users/{userId}` cho học sinh
+ * (Tránh mở listener toàn bộ collection `users` cho hàng trăm học sinh cùng lúc)
+ */
+export function subscribeToSingleUser(
+  userId: string,
+  onData: (user: UserAccount | null) => void
+): () => void {
+  const safeId = userId.trim();
+  if (!safeId) {
+    onData(null);
+    return () => {};
+  }
+
+  return onSnapshot(
+    doc(db, 'users', safeId),
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        onData(null);
+        return;
+      }
+      const data = snapshot.data() as UserAccount;
+      if (isLegacyVirtualUser(data)) {
+        onData(null);
+        return;
+      }
+      onData({
+        ...data,
+        bookmarkedQuestions: data.bookmarkedQuestions ?? [],
+        wrongQuestions: data.wrongQuestions ?? [],
+        masteredQuestions: data.masteredQuestions ?? [],
+        practiceProgress: data.practiceProgress ?? {},
+      });
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${safeId}`);
+    }
+  );
+}
+
+/**
+ * Tải danh sách câu hỏi một lần (`getDocs`) cho học sinh ở chế độ Luyện tập / Thi thử
+ * thay vì duy trì hàng trăm kết nối `onSnapshot` đồng thời trên toàn bộ ngân hàng câu hỏi.
+ */
+export async function fetchQuestionsOnce(): Promise<Question[]> {
+  try {
+    const snapshot = await getDocs(collection(db, 'questions'));
+    const list = snapshot.docs
+      .map((d) => d.data() as Question)
+      .filter((q) => !isLegacyVirtualQuestion(q));
+    list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    return list;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'questions');
+    return [];
+  }
+}
+
+/**
+ * Lắng nghe chỉ các lượt thi của đúng học sinh hiện tại (`where('userId', '==', userId)`),
+ * có hỗ trợ gộp an toàn các bản ghi lịch sử cũ chỉ lưu `username`.
+ */
+export function subscribeToUserAttempts(
+  userId: string,
+  username: string | undefined,
+  onData: (attempts: ExamAttempt[]) => void
+): () => void {
+  const safeUserId = userId.trim();
+  const safeUsername = username?.trim() || '';
+  if (!safeUserId && !safeUsername) {
+    onData([]);
+    return () => {};
+  }
+
+  const byUserIdMap = new Map<string, ExamAttempt>();
+  const byUsernameMap = new Map<string, ExamAttempt>();
+
+  const emitMerged = () => {
+    const merged = new Map<string, ExamAttempt>();
+    byUsernameMap.forEach((attempt, id) => {
+      merged.set(id, attempt);
+    });
+    byUserIdMap.forEach((attempt, id) => {
+      merged.set(id, attempt);
+    });
+    const list = Array.from(merged.values()).filter(
+      (a) => !isLegacyVirtualAttempt(a)
+    );
+    list.sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''));
+    onData(list);
+  };
+
+  const unsubscribers: Array<() => void> = [];
+
+  if (safeUserId) {
+    const qByUserId = query(
+      collection(db, 'attempts'),
+      where('userId', '==', safeUserId)
+    );
+    unsubscribers.push(
+      onSnapshot(
+        qByUserId,
+        (snapshot) => {
+          byUserIdMap.clear();
+          snapshot.docs.forEach((d) => {
+            const data = d.data() as ExamAttempt;
+            const id = data.id || d.id;
+            byUserIdMap.set(id, { ...data, id });
+          });
+          emitMerged();
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.LIST, `attempts(userId=${safeUserId})`);
+        }
+      )
+    );
+  }
+
+  if (safeUsername) {
+    const qByUsername = query(
+      collection(db, 'attempts'),
+      where('username', '==', safeUsername)
+    );
+    unsubscribers.push(
+      onSnapshot(
+        qByUsername,
+        (snapshot) => {
+          byUsernameMap.clear();
+          snapshot.docs.forEach((d) => {
+            const data = d.data() as ExamAttempt;
+            const id = data.id || d.id;
+            byUsernameMap.set(id, { ...data, id });
+          });
+          emitMerged();
+        },
+        (error) => {
+          handleFirestoreError(
+            error,
+            OperationType.LIST,
+            `attempts(username=${safeUsername})`
+          );
+        }
+      )
+    );
+  }
+
+  return () => {
+    unsubscribers.forEach((unsub) => {
+      try {
+        unsub();
+      } catch {
+        // Bỏ qua lỗi khi hủy listener
+      }
+    });
+  };
 }
 
 /**

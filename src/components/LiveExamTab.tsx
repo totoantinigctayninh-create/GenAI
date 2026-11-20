@@ -797,7 +797,7 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
     }
   }, [currentUser.id, persistBackupToLocal]);
 
-  // Lên lịch tự lưu có debounce ngắn (250ms) mỗi khi chọn đáp án hoặc gắn cờ
+  // Lên lịch tự lưu có debounce 900ms mỗi khi chọn đáp án hoặc gắn cờ
   const scheduleDebouncedSave = useCallback(
     (questionId: string) => {
       dirtyQuestionIdsRef.current.add(questionId);
@@ -814,10 +814,21 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
       debounceTimerRef.current = window.setTimeout(() => {
         debounceTimerRef.current = null;
         void flushDirtyAnswersToServer();
-      }, 250);
+      }, 900);
     },
     [flushDirtyAnswersToServer, persistBackupToLocal]
   );
+
+  // Hủy bộ hẹn giờ debounce và đẩy ngay các câu đã thay đổi lên máy chủ (khi chuyển câu hoặc mở hộp thoại nộp bài)
+  const flushDirtyAnswersImmediately = useCallback(() => {
+    if (debounceTimerRef.current !== null) {
+      window.clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    if (dirtyQuestionIdsRef.current.size > 0 && !isBrowserSimulatedOrRealOffline()) {
+      void flushDirtyAnswersToServer();
+    }
+  }, [flushDirtyAnswersToServer]);
 
   // Đồng hồ đếm ngược theo hạn nộp máy chủ + ghi thời gian làm mỗi câu (mỗi 1 giây)
   // Lưu ý: Đồng hồ vẫn chạy ngay cả khi đang mở hộp thoại Esc hoặc lớp phủ cảnh báo rời màn hình
@@ -887,7 +898,7 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
           void flushQueuedViolationsToServer();
         }
       }
-    }, 1500);
+    }, 4000);
 
     return () => {
       window.removeEventListener('online', handleOnline);
@@ -902,24 +913,47 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
     flushQueuedViolationsToServer,
   ]);
 
-  // Đồng bộ định kỳ với máy chủ (mỗi 15 giây) để cập nhật hạn nộp và trạng thái bài thi
+  // Đồng bộ định kỳ gọn nhẹ với máy chủ (mỗi 30 giây + jitter ngẫu nhiên 0–6 giây)
+  // Chỉ gọi endpoint /status (~200 byte) thay vì tải lại toàn bộ 40–50 câu hỏi
   useEffect(() => {
     if (!activePaper || submittedResult) return;
 
+    let cancelled = false;
+    let pollTimerId: number | null = null;
+
+    const scheduleNextPoll = () => {
+      if (cancelled) return;
+      const delayMs = 30000 + Math.floor(Math.random() * 6000);
+      pollTimerId = window.setTimeout(() => {
+        pollTimerId = null;
+        void syncServerClockAndDeadline();
+      }, delayMs);
+    };
+
     const syncServerClockAndDeadline = async () => {
-      if (isBrowserSimulatedOrRealOffline()) return;
+      if (cancelled) return;
+      if (isBrowserSimulatedOrRealOffline()) {
+        scheduleNextPoll();
+        return;
+      }
       try {
-        const freshPaper = await examSessionApi.getAttemptPaper(
+        const freshStatus = await examSessionApi.getAttemptStatus(
           currentUser.id,
           activePaper.attempt.id,
           activePaper.sessionToken
         );
 
-        if (freshPaper.attempt.status === 'submitted') {
+        if (cancelled) return;
+
+        if (
+          freshStatus.status === 'submitted' ||
+          freshStatus.sessionStatus === 'ended'
+        ) {
           const res = await examSessionApi.getResult(
             currentUser.id,
             activePaper.attempt.id
           );
+          if (cancelled) return;
           removeLocalAttemptBackup(currentUser.id, activePaper.attempt.id);
           exitFullscreenSafely();
           activePaperRef.current = null;
@@ -930,25 +964,42 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
         }
 
         const nextOffset = computeServerClockOffsetMs(
-          freshPaper.attempt.serverNow,
+          freshStatus.serverNow,
           Date.now()
         );
         serverOffsetMsRef.current = nextOffset;
-        deadlineIsoRef.current = freshPaper.attempt.deadlineAt;
+        deadlineIsoRef.current = freshStatus.deadlineAt;
+        if (typeof freshStatus.maxViolations === 'number') {
+          maxViolationsRef.current = freshStatus.maxViolations;
+        }
+        if (
+          typeof freshStatus.violationCount === 'number' &&
+          freshStatus.violationCount > violationCountRef.current
+        ) {
+          violationCountRef.current = freshStatus.violationCount;
+          setViolationCount(freshStatus.violationCount);
+        }
         setRemainingSeconds(
           computeServerRemainingSeconds(
-            freshPaper.attempt.deadlineAt,
+            freshStatus.deadlineAt,
             nextOffset,
             Date.now()
           )
         );
       } catch {
         // Bỏ qua nếu mạng chập chờn tạm thời
+      } finally {
+        scheduleNextPoll();
       }
     };
 
-    const interval = window.setInterval(syncServerClockAndDeadline, 15000);
-    return () => window.clearInterval(interval);
+    scheduleNextPoll();
+    return () => {
+      cancelled = true;
+      if (pollTimerId !== null) {
+        window.clearTimeout(pollTimerId);
+      }
+    };
   }, [activePaper, submittedResult, currentUser.id, onLiveExamSubmitted]);
 
   // Lưu tức thời trước khi đóng/tải lại trang (beforeunload)
@@ -1000,9 +1051,10 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
       window.clearTimeout(submitArmTimerRef.current);
       submitArmTimerRef.current = null;
     }
+    flushDirtyAnswersImmediately();
     setIsSubmitArmed(false);
     setShowSubmitModal(true);
-  }, []);
+  }, [flushDirtyAnswersImmediately]);
 
   const closeSubmitDialog = useCallback(() => {
     if (submitArmTimerRef.current !== null) {
@@ -1065,7 +1117,7 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
     }
   }, [fullscreenExitOverlayOpen]);
 
-  // Phím tắt chuyển câu (ArrowLeft / ArrowRight)
+  // Phím tắt chuyển câu (ArrowLeft / ArrowRight) & nút Câu trước / Câu tiếp theo / Bảng điều hướng câu
   const handleSelectQuestionIndex = useCallback(
     (nextIndex: number) => {
       const paper = activePaperRef.current;
@@ -1074,19 +1126,12 @@ export const LiveExamTab: React.FC<LiveExamTabProps> = ({
         0,
         Math.min(paper.questions.length - 1, nextIndex)
       );
-      const prevQ = paper.questions[currentIndexRef.current];
-      if (
-        prevQ &&
-        (userAnswersRef.current[prevQ.id] !== undefined ||
-          flaggedMapRef.current[prevQ.id])
-      ) {
-        scheduleDebouncedSave(prevQ.id);
-      }
       currentIndexRef.current = bounded;
       setCurrentIndex(bounded);
       persistBackupToLocal();
+      flushDirtyAnswersImmediately();
     },
-    [persistBackupToLocal, scheduleDebouncedSave]
+    [flushDirtyAnswersImmediately, persistBackupToLocal]
   );
 
   // ==========================================================================

@@ -333,6 +333,15 @@ export interface StudentAttemptPaperPayload {
   >;
 }
 
+export interface StudentAttemptStatusPayload {
+  status: SessionAttemptStatus;
+  serverNow: string;
+  deadlineAt: string;
+  violationCount: number;
+  maxViolations: number;
+  sessionStatus: ExamSessionStatus;
+}
+
 export interface StudentAttemptResultPayload {
   attemptId: string;
   sessionId: string;

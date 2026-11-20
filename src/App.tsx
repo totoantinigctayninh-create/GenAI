@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LoginScreen } from './components/LoginScreen';
 import { ThemeProvider } from './context/ThemeContext';
 
@@ -13,6 +13,7 @@ import {
   deleteQuestionFromFirestore,
   deleteStudentAccount,
   ensureSeedDataInitialized,
+  fetchQuestionsOnce,
   isLegacyVirtualAttempt,
   isLegacyVirtualQuestion,
   isLegacyVirtualUser,
@@ -28,6 +29,8 @@ import {
   subscribeToAttempts,
   subscribeToDepartmentLogo,
   subscribeToQuestions,
+  subscribeToSingleUser,
+  subscribeToUserAttempts,
   subscribeToUsers,
   syncExamWrongQuestionsToFirestore,
   testFirestoreConnection,
@@ -194,14 +197,69 @@ export default function App() {
     };
   }, []);
 
-  // Khởi tạo kết nối Firestore cho tài khoản người dùng khi đã đăng nhập
+  // Lưu hồ sơ đơn lẻ cho học sinh (hoặc kiểm tra vai trò giáo viên phụ khi tải lại trang)
+  const [singleUserDoc, setSingleUserDoc] = useState<UserAccount | null>(null);
+  const studentQuestionsCacheRef = useRef<Question[] | null>(null);
+  const lastRemoteTeacherSyncFingerprintRef = useRef<string>('');
+
+  // Xác định sớm tài khoản hiện tại có chắc chắn là Giáo viên hay không
+  // Lưu ý: Học sinh KHÔNG BAO GIỜ mở listener toàn bộ collection `users`
+  const isConfirmedTeacher = useMemo(() => {
+    if (!activeUserId) return false;
+    const normalizedId = activeUserId.toLowerCase();
+    if (
+      authenticatedUserSnapshot &&
+      authenticatedUserSnapshot.id.toLowerCase() === normalizedId
+    ) {
+      return authenticatedUserSnapshot.role === 'teacher';
+    }
+    if (
+      singleUserDoc &&
+      singleUserDoc.id.toLowerCase() === normalizedId &&
+      singleUserDoc.role === 'teacher'
+    ) {
+      return true;
+    }
+    if (normalizedId === 'admin') {
+      return true;
+    }
+    if (import.meta.env.DEV) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('role') === 'teacher' || normalizedId.startsWith('gv_')) {
+        return true;
+      }
+    }
+    return false;
+  }, [activeUserId, authenticatedUserSnapshot, singleUserDoc]);
+
+  // Khởi tạo kết nối Firestore phân quyền theo vai trò khi đã đăng nhập:
+  // - Giáo viên: lắng nghe toàn bộ `users`
+  // - Học sinh: CHỈ lắng nghe đúng 1 document `users/{activeUserId}`
   useEffect(() => {
     if (!activeUserId) {
       setUsers([]);
+      setSingleUserDoc(null);
+      studentQuestionsCacheRef.current = null;
+      lastRemoteTeacherSyncFingerprintRef.current = '';
+      examSessionApi.cancelPendingRemoteContextSync();
       return;
     }
 
     let isMounted = true;
+
+    if (!isConfirmedTeacher) {
+      const unsubSingleUser = subscribeToSingleUser(activeUserId, (liveUser) => {
+        if (!isMounted) return;
+        setSingleUserDoc(liveUser);
+        setUsers(liveUser ? [liveUser] : []);
+      });
+
+      return () => {
+        isMounted = false;
+        unsubSingleUser();
+      };
+    }
+
     const unsubUsers = subscribeToUsers((liveUsers) => {
       if (!isMounted) return;
       const cleanedList = liveUsers
@@ -239,12 +297,16 @@ export default function App() {
       isMounted = false;
       unsubUsers();
     };
-  }, [activeUserId]);
+  }, [activeUserId, isConfirmedTeacher]);
 
   const currentUser = useMemo(() => {
     if (!activeUserId) return null;
     const found =
       users.find((u) => u.id.toLowerCase() === activeUserId.toLowerCase()) ??
+      (singleUserDoc &&
+      singleUserDoc.id.toLowerCase() === activeUserId.toLowerCase()
+        ? singleUserDoc
+        : null) ??
       (authenticatedUserSnapshot &&
       authenticatedUserSnapshot.id.toLowerCase() === activeUserId.toLowerCase()
         ? authenticatedUserSnapshot
@@ -308,12 +370,16 @@ export default function App() {
     }
 
     return null;
-  }, [activeUserId, users, authenticatedUserSnapshot]);
+  }, [activeUserId, users, singleUserDoc, authenticatedUserSnapshot]);
 
   const isTeacherRole = currentUser?.role === 'teacher';
+  const currentStudentUsername = !isTeacherRole ? currentUser?.username : undefined;
 
-  // Chỉ lắng nghe bộ câu hỏi và lịch sử tự luyện khi đã đăng nhập VÀ học sinh KHÔNG ở chế độ "Thi ngay"
-  // Khi học sinh bước vào tab "Thi ngay", lập tức xóa bộ câu hỏi (chứa correctAnswer) khỏi bộ nhớ React và ngắt lắng nghe Firestore
+  // Tải & lắng nghe bộ câu hỏi và lịch sử tự luyện theo đúng vai trò:
+  // - Giáo viên: dùng `onSnapshot` thời gian thực cho cả `questions` và `attempts`
+  // - Học sinh: khi vào tab "Thi ngay", lập tức xóa bộ câu hỏi khỏi bộ nhớ React và ngắt lắng nghe;
+  //   khi ở chế độ Luyện tập / Thi thử, tải `questions` 1 lần qua `getDocs` (lưu cache trong phiên)
+  //   và chỉ lắng nghe các `attempts` của chính học sinh đó.
   useEffect(() => {
     if (!activeUserId) {
       setQuestions([]);
@@ -321,33 +387,108 @@ export default function App() {
       return;
     }
 
-    if (isLiveExamMode && !isTeacherRole) {
+    if (isTeacherRole) {
+      const unsubQuestions = subscribeToQuestions((liveQuestions) => {
+        setQuestions(liveQuestions);
+        if (liveQuestions.length > 0) {
+          setPublicQuestionsCount(liveQuestions.length);
+        }
+      });
+      const unsubAttempts = subscribeToAttempts((liveAttempts) => {
+        setAttempts(liveAttempts);
+      });
+      return () => {
+        unsubQuestions();
+        unsubAttempts();
+      };
+    }
+
+    if (isLiveExamMode) {
+      studentQuestionsCacheRef.current = null;
       setQuestions([]);
       return;
     }
 
-    const unsubQuestions = subscribeToQuestions((liveQuestions) => {
-      setQuestions(liveQuestions);
-      if (liveQuestions.length > 0) {
-        setPublicQuestionsCount(liveQuestions.length);
-      }
-    });
-    const unsubAttempts = subscribeToAttempts((liveAttempts) => {
-      setAttempts(liveAttempts);
-    });
-    return () => {
-      unsubQuestions();
-      unsubAttempts();
-    };
-  }, [isLiveExamMode, activeUserId, isTeacherRole]);
+    let isCancelled = false;
 
+    if (studentQuestionsCacheRef.current && studentQuestionsCacheRef.current.length > 0) {
+      setQuestions(studentQuestionsCacheRef.current);
+      setPublicQuestionsCount(studentQuestionsCacheRef.current.length);
+    } else {
+      void fetchQuestionsOnce().then((fetchedQuestions) => {
+        if (isCancelled) return;
+        studentQuestionsCacheRef.current = fetchedQuestions;
+        setQuestions(fetchedQuestions);
+        if (fetchedQuestions.length > 0) {
+          setPublicQuestionsCount(fetchedQuestions.length);
+        }
+      });
+    }
+
+    const unsubStudentAttempts = subscribeToUserAttempts(
+      activeUserId,
+      currentStudentUsername,
+      (studentAttempts) => {
+        if (isCancelled) return;
+        setAttempts(studentAttempts);
+      }
+    );
+
+    return () => {
+      isCancelled = true;
+      unsubStudentAttempts();
+    };
+  }, [isLiveExamMode, activeUserId, isTeacherRole, currentStudentUsername]);
+
+  // Cập nhật bộ nhớ đệm cục bộ trong examSessionApi mà KHÔNG bắn POST /sync-context tràn lan
   useEffect(() => {
-    examSessionApi.syncContext({
-      currentUser,
-      users: isTeacherRole ? users : undefined,
-      questions: isTeacherRole ? questions : isLiveExamMode ? [] : undefined,
-    });
+    examSessionApi.syncContext(
+      {
+        currentUser,
+        users: isTeacherRole ? users : undefined,
+        questions: isTeacherRole ? questions : isLiveExamMode ? [] : undefined,
+      },
+      { syncRemote: false }
+    );
   }, [currentUser, users, questions, isTeacherRole, isLiveExamMode]);
+
+  // Dấu vân tay cấu trúc dành RIÊNG cho Giáo viên: chỉ thay đổi khi câu hỏi hoặc thông tin định danh tài khoản đổi
+  // (tuyệt đối bỏ qua các biến động thời gian học `totalStudySeconds`, `lastLogin`, `activeStatus`, `practiceProgress`)
+  const teacherStructuralFingerprint = useMemo(() => {
+    if (!isTeacherRole) return '';
+    const usersSignature = users
+      .map(
+        (u) =>
+          `${u.id}|${u.username}|${u.password || ''}|${u.fullName}|${u.role}|${u.className || ''}`
+      )
+      .join(';');
+    const questionsSignature = questions
+      .map(
+        (q) =>
+          `${q.id}|${q.type}|${q.topic}|${q.prompt}|${JSON.stringify(q.correctAnswer)}|${q.options?.length ?? 0}|${q.subItems?.length ?? 0}|${q.pairs?.length ?? 0}|${q.steps?.length ?? 0}|${q.imageUrl ? q.imageUrl.length : 0}`
+      )
+      .join(';');
+    return `u:${users.length}:${usersSignature}::q:${questions.length}:${questionsSignature}`;
+  }, [isTeacherRole, users, questions]);
+
+  // Chỉ gửi POST /api/exam-sessions/sync-context (debounce 5000ms) cho tài khoản Giáo viên khi dữ liệu cấu trúc thực sự đổi
+  useEffect(() => {
+    if (!isTeacherRole || !teacherStructuralFingerprint) {
+      return;
+    }
+    if (lastRemoteTeacherSyncFingerprintRef.current === teacherStructuralFingerprint) {
+      return;
+    }
+    lastRemoteTeacherSyncFingerprintRef.current = teacherStructuralFingerprint;
+    examSessionApi.syncContext(
+      {
+        currentUser,
+        users,
+        questions,
+      },
+      { syncRemote: true, debounceMs: 5000 }
+    );
+  }, [isTeacherRole, teacherStructuralFingerprint, currentUser, users, questions]);
 
   const handleLogin = useCallback(
     async (username: string, password: string) => {
@@ -403,7 +544,11 @@ export default function App() {
     setIsLiveExamMode(false);
     setQuestions([]);
     setUsers([]);
+    setSingleUserDoc(null);
     setAttempts([]);
+    studentQuestionsCacheRef.current = null;
+    lastRemoteTeacherSyncFingerprintRef.current = '';
+    examSessionApi.cancelPendingRemoteContextSync();
     try {
       localStorage.removeItem(SESSION_STORAGE_KEY);
     } catch {
@@ -418,11 +563,13 @@ export default function App() {
     async (additionalSeconds: number) => {
       if (
         !activeUserId ||
+        additionalSeconds <= 0 ||
         activeUserId.toLowerCase() === 'admin' ||
         currentUser?.role === 'teacher'
       ) {
         return;
       }
+      const nowIso = new Date().toISOString();
       setUsers((prev) =>
         prev.map((u) => {
           if (u.id.toLowerCase() !== activeUserId.toLowerCase()) return u;
@@ -431,10 +578,30 @@ export default function App() {
             ...u,
             totalStudySeconds: nextSec,
             totalStudyMinutes: Math.round(nextSec / 60),
-            lastLogin: new Date().toISOString(),
+            lastLogin: nowIso,
           };
         })
       );
+      setSingleUserDoc((prev) => {
+        if (!prev || prev.id.toLowerCase() !== activeUserId.toLowerCase()) return prev;
+        const nextSec = (prev.totalStudySeconds || 0) + additionalSeconds;
+        return {
+          ...prev,
+          totalStudySeconds: nextSec,
+          totalStudyMinutes: Math.round(nextSec / 60),
+          lastLogin: nowIso,
+        };
+      });
+      setAuthenticatedUserSnapshot((prev) => {
+        if (!prev || prev.id.toLowerCase() !== activeUserId.toLowerCase()) return prev;
+        const nextSec = (prev.totalStudySeconds || 0) + additionalSeconds;
+        return {
+          ...prev,
+          totalStudySeconds: nextSec,
+          totalStudyMinutes: Math.round(nextSec / 60),
+          lastLogin: nowIso,
+        };
+      });
       await updateUserActivityAndStudyTime(
         activeUserId,
         'studying',

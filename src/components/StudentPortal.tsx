@@ -185,8 +185,10 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   );
   const [liveExamHistory, setLiveExamHistory] = useState<StudentAttemptResultPayload[]>([]);
   const [selectedLiveHistoryId, setSelectedLiveHistoryId] = useState<string | null>(null);
-  const [sessionStudySeconds, setSessionStudySeconds] = useState(0);
-  const lastSyncedSecondRef = React.useRef<number>(0);
+  const [unsyncedStudySeconds, setUnsyncedStudySeconds] = useState(0);
+  const unsyncedStudySecondsRef = React.useRef<number>(0);
+  const activeTabRef = React.useRef<StudentTab>(activeTab);
+  activeTabRef.current = activeTab;
 
   // Đồng bộ tab hiện tại lên URL để khi tải lại trang giữa lúc thi vẫn ở đúng tab "Thi ngay"
   useEffect(() => {
@@ -242,24 +244,71 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     });
   };
 
-  // Đồng hồ đếm thời gian ôn tập thực tế và tự động đồng bộ Firestore mỗi 20 giây
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setSessionStudySeconds((prev) => prev + 1);
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const STUDY_SYNC_INTERVAL_SECONDS = 180;
+  const STUDY_MIN_FLUSH_SECONDS = 15;
 
+  const flushUnsyncedStudyTime = React.useCallback(
+    async (minSeconds: number) => {
+      if (activeTabRef.current === 'live-exam') return;
+      const pending = unsyncedStudySecondsRef.current;
+      if (pending < minSeconds) return;
+      unsyncedStudySecondsRef.current = 0;
+      setUnsyncedStudySeconds(0);
+      try {
+        await onSyncStudyTime(pending);
+      } catch {
+        // Bỏ qua lỗi mạng tạm thời
+      }
+    },
+    [onSyncStudyTime]
+  );
+
+  // Đồng hồ đếm thời gian ôn tập thực tế (tạm dừng hoàn toàn khi đang ở tab "Thi ngay")
+  // và chỉ đồng bộ lên Firestore mỗi 180 giây (3 phút) để tối ưu băng thông cho 150–300 học sinh
   useEffect(() => {
-    if (
-      sessionStudySeconds > 0 &&
-      sessionStudySeconds % 20 === 0 &&
-      lastSyncedSecondRef.current !== sessionStudySeconds
-    ) {
-      lastSyncedSecondRef.current = sessionStudySeconds;
-      onSyncStudyTime(20).catch(() => {});
+    if (activeTab === 'live-exam') {
+      return;
     }
-  }, [sessionStudySeconds, onSyncStudyTime]);
+
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      const next = unsyncedStudySecondsRef.current + 1;
+      if (next >= STUDY_SYNC_INTERVAL_SECONDS) {
+        unsyncedStudySecondsRef.current = 0;
+        setUnsyncedStudySeconds(0);
+        void onSyncStudyTime(next).catch(() => {});
+      } else {
+        unsyncedStudySecondsRef.current = next;
+        setUnsyncedStudySeconds(next);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [activeTab, onSyncStudyTime]);
+
+  // Đẩy phần thời gian ôn tập còn lại (nếu >= 15 giây) khi học sinh ẩn tab hoặc đóng trang
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        void flushUnsyncedStudyTime(STUDY_MIN_FLUSH_SECONDS);
+      }
+    };
+    const handlePageHide = () => {
+      void flushUnsyncedStudyTime(STUDY_MIN_FLUSH_SECONDS);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, [flushUnsyncedStudyTime]);
+
+  const handleStudentLogout = React.useCallback(async () => {
+    await flushUnsyncedStudyTime(STUDY_MIN_FLUSH_SECONDS);
+    await onLogout();
+  }, [flushUnsyncedStudyTime, onLogout]);
 
   const bookmarkedIds = useMemo(
     () => currentUser.bookmarkedQuestions ?? [],
@@ -659,7 +708,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   };
 
   const totalCombinedStudySeconds =
-    (currentUser.totalStudySeconds || 0) + (sessionStudySeconds % 20);
+    (currentUser.totalStudySeconds || 0) + unsyncedStudySeconds;
 
   // Kiểm tra xem học sinh có đang ở trong không gian Tập trung Ôn thi / Thi thử / Thi ngay hay không
   const isInFocusWorkspace =
@@ -897,7 +946,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 <button
                   type="button"
                   data-testid="student-logout-btn"
-                  onClick={onLogout}
+                  onClick={handleStudentLogout}
                   className="w-full h-10 px-3 text-[14px] font-medium text-rose-700 hover:bg-rose-50 rounded-lg transition-colors duration-150 inline-flex items-center gap-2 cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />
@@ -1072,7 +1121,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   />
                   <button
                     type="button"
-                    onClick={onLogout}
+                    onClick={handleStudentLogout}
                     className="w-full h-10 px-3 text-[14px] font-medium text-rose-700 hover:bg-rose-50 rounded-lg inline-flex items-center gap-2 cursor-pointer"
                   >
                     <LogOut className="w-4 h-4" />

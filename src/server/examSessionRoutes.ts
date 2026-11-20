@@ -12,6 +12,11 @@ import {
 } from './authToken.ts';
 import type { ViolationEventType } from '../types/examSession.ts';
 import type { UserAccount, UserAnswer } from '../types/exam.ts';
+import {
+  createThrottledSseDispatcher,
+  DEFAULT_SSE_THROTTLE_WINDOW_MS,
+  isCriticalSessionRealtimeEvent,
+} from './sseThrottle.ts';
 
 export interface ExamSessionRouterOptions {
   authSecret?: string;
@@ -312,16 +317,28 @@ export function createExamSessionRouter(
 
       writeSse('snapshot', { ok: true, ...initialDetail });
 
-      const unsubscribe = engine.subscribeToSessionEvents(sessionId, (event) => {
-        try {
-          const detail = engine.getTeacherSessionDetail(actorId, sessionId);
-          writeSse('update', { event, detail });
-        } catch {
-          // Nếu ca thi đã bị xóa hoặc giáo viên mất quyền, đóng luồng nhẹ nhàng
-          if (!res.writableEnded) {
-            res.end();
+      const throttledDispatcher = createThrottledSseDispatcher({
+        windowMs: DEFAULT_SSE_THROTTLE_WINDOW_MS,
+        isCritical: (event) => {
+          const currentSessionStatus = engine.getSessionStatus(sessionId);
+          return isCriticalSessionRealtimeEvent(event, currentSessionStatus);
+        },
+        onFlush: (latestEvent) => {
+          try {
+            const detail = engine.getTeacherSessionDetail(actorId, sessionId);
+            writeSse('update', { event: latestEvent, detail });
+          } catch {
+            // Nếu ca thi đã bị xóa hoặc giáo viên mất quyền, đóng luồng nhẹ nhàng
+            throttledDispatcher.dispose();
+            if (!res.writableEnded) {
+              res.end();
+            }
           }
-        }
+        },
+      });
+
+      const unsubscribe = engine.subscribeToSessionEvents(sessionId, (event) => {
+        throttledDispatcher.enqueue(event);
       });
 
       const heartbeatTimer = setInterval(() => {
@@ -331,6 +348,7 @@ export function createExamSessionRouter(
 
       req.on('close', () => {
         clearInterval(heartbeatTimer);
+        throttledDispatcher.dispose();
         unsubscribe();
       });
     } catch (error) {
@@ -575,6 +593,24 @@ export function createExamSessionRouter(
       handleRouteError(res, error);
     }
   });
+
+  // Kiểm tra trạng thái gọn nhẹ (~200 byte) của lượt thi để đồng bộ đồng hồ & hạn nộp
+  const handleGetAttemptStatus = (req: Request, res: Response) => {
+    try {
+      const actorId = resolveStudentActor(req);
+      const sessionToken = extractSessionToken(req);
+      const statusPayload = engine.getAttemptStatus(
+        actorId,
+        req.params.attemptId,
+        sessionToken
+      );
+      res.json({ ok: true, ...statusPayload });
+    } catch (error) {
+      handleRouteError(res, error);
+    }
+  };
+  router.get('/exam-attempts/:attemptId/status', handleGetAttemptStatus);
+  router.get('/attempts/:attemptId/status', handleGetAttemptStatus);
 
   // Lưu đáp án từng câu trong lúc làm bài
   router.post('/attempts/:attemptId/answers', (req: Request, res: Response) => {
