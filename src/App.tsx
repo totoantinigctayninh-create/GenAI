@@ -152,14 +152,15 @@ export default function App() {
       if (res.status === 'valid') {
         setAuthenticatedUserSnapshot(res.user);
       } else if (res.status === 'invalid') {
+        examSessionApi.clearAuthToken();
         setAuthenticatedUserSnapshot(null);
         setActiveUserId(null);
+        setLoginError(null);
         try {
           localStorage.removeItem(SESSION_STORAGE_KEY);
         } catch {
           // Bỏ qua
         }
-        setLoginError(res.message);
       }
     });
 
@@ -541,6 +542,7 @@ export default function App() {
     examSessionApi.clearAuthToken();
     setAuthenticatedUserSnapshot(null);
     setActiveUserId(null);
+    setLoginError(null);
     setIsLiveExamMode(false);
     setQuestions([]);
     setUsers([]);
@@ -933,6 +935,7 @@ export default function App() {
           onLogin={handleLogin}
           isLoading={isAuthenticating}
           errorMessage={loginError}
+          onClearError={() => setLoginError(null)}
           seededUsers={users}
           questionsCount={questions.length || publicQuestionsCount}
           departmentLogoUrl={effectiveDepartmentLogoUrl}

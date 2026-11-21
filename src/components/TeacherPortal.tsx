@@ -167,7 +167,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
     text: string;
   } | null>(null);
   const [isImportingFile, setIsImportingFile] = useState<boolean>(false);
-  const [isResettingSeed, setIsResettingSeed] = useState(false);
 
   const jsonInputRef = useRef<HTMLInputElement | null>(null);
   const excelInputRef = useRef<HTMLInputElement | null>(null);
@@ -462,19 +461,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
       blob,
       `Bao_Cao_Ket_Qua_Lop_Hoc_Certiport_GenAI_${dateStr}.xlsx`
     );
-  };
-
-  const handleResetSeed = async () => {
-    setIsResettingSeed(true);
-    try {
-      await onResetSeedData();
-      setBankStatusMessage({
-        type: 'success',
-        text: 'Đã dọn sạch toàn bộ dữ liệu ảo (seed data) khỏi hệ thống và Firebase Firestore.',
-      });
-    } finally {
-      setIsResettingSeed(false);
-    }
   };
 
   const canManageDepartmentLogo = Boolean(
@@ -899,17 +885,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
                   )}
                 </>
               )}
-              <button
-                type="button"
-                disabled={isResettingSeed}
-                onClick={handleResetSeed}
-                className="px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <RefreshCw
-                  className={`w-3.5 h-3.5 ${isResettingSeed ? 'animate-spin' : ''}`}
-                />
-                <span>Dọn sạch dữ liệu ảo</span>
-              </button>
               <button
                 type="button"
                 data-testid="open-add-question-modal-btn"

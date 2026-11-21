@@ -11,6 +11,7 @@ interface LoginScreenProps {
   onLogin: (username: string, password: string) => Promise<void>;
   isLoading: boolean;
   errorMessage: string | null;
+  onClearError?: () => void;
   seededUsers: UserAccount[];
   questionsCount: number;
   departmentLogoUrl?: string;
@@ -33,6 +34,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onLogin,
   isLoading,
   errorMessage,
+  onClearError,
   questionsCount,
   departmentLogoUrl = '',
 }) => {
@@ -151,7 +153,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     required
                     autoComplete="username"
                     value={username}
-                    onChange={(e) => setUsername(e.target.value)}
+                    onChange={(e) => {
+                      setUsername(e.target.value);
+                      if (errorMessage) onClearError?.();
+                    }}
                     placeholder="Nhập Mã học sinh hoặc tài khoản Giáo viên"
                     className="w-full pl-10 pr-4 py-3 text-base sm:text-sm rounded-xl border border-slate-300 bg-slate-50/50 focus:bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-teal-600 transition-colors"
                   />
@@ -173,7 +178,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     required
                     autoComplete="current-password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (errorMessage) onClearError?.();
+                    }}
                     placeholder="Nhập mật khẩu"
                     className="w-full pl-10 pr-12 py-3 text-base sm:text-sm rounded-xl border border-slate-300 bg-slate-50/50 focus:bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-teal-600 transition-colors"
                   />
