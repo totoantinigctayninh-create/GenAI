@@ -15,6 +15,7 @@ import {
   setDoc,
   setLogLevel,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import {
@@ -760,6 +761,37 @@ export async function deleteStudentAccount(userId: string): Promise<void> {
     await deleteDoc(doc(db, 'users', userId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
+  }
+}
+
+/**
+ * Xóa nhiều tài khoản cùng lúc trên Firestore theo từng lô `writeBatch` (tối đa 450 tài khoản/lô),
+ * luôn bảo vệ tài khoản quản trị gốc `admin`.
+ */
+export async function deleteMultipleStudentAccounts(
+  userIds: string[]
+): Promise<void> {
+  const uniqueSafeIds = Array.from(
+    new Set(
+      userIds
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0 && id.toLowerCase() !== 'admin')
+    )
+  );
+  if (uniqueSafeIds.length === 0) return;
+
+  const CHUNK_SIZE = 450;
+  for (let i = 0; i < uniqueSafeIds.length; i += CHUNK_SIZE) {
+    const chunk = uniqueSafeIds.slice(i, i + CHUNK_SIZE);
+    try {
+      const batch = writeBatch(db);
+      for (const uid of chunk) {
+        batch.delete(doc(db, 'users', uid));
+      }
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'users/batch');
+    }
   }
 }
 

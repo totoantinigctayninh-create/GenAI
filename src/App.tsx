@@ -10,6 +10,7 @@ const TeacherPortal = lazy(() =>
 );
 import {
   authenticateWithUsernamePassword,
+  deleteMultipleStudentAccounts,
   deleteQuestionFromFirestore,
   deleteStudentAccount,
   ensureSeedDataInitialized,
@@ -920,9 +921,33 @@ export default function App() {
   );
 
   const handleDeleteStudent = useCallback(async (userId: string) => {
+    if (userId.toLowerCase() === 'admin') return;
     setUsers((prev) => prev.filter((u) => u.id !== userId));
     await deleteStudentAccount(userId);
   }, []);
+
+  const handleBatchDeleteStudents = useCallback(
+    async (userIds: string[]) => {
+      const currentIdLower = currentUser?.id?.toLowerCase() || '';
+      const safeIds = Array.from(
+        new Set(
+          userIds
+            .map((id) => id.trim())
+            .filter(
+              (id) =>
+                id.length > 0 &&
+                id.toLowerCase() !== 'admin' &&
+                id.toLowerCase() !== currentIdLower
+            )
+        )
+      );
+      if (safeIds.length === 0) return;
+      const deleteSet = new Set(safeIds);
+      setUsers((prev) => prev.filter((u) => !deleteSet.has(u.id)));
+      await deleteMultipleStudentAccounts(safeIds);
+    },
+    [currentUser]
+  );
 
   const handleSaveQuestion = useCallback(async (question: Question) => {
     setQuestions((prev) => {
@@ -1008,6 +1033,7 @@ export default function App() {
             onUpdateStudentPassword={handleUpdateStudentPassword}
             onResetStudentProgress={handleResetStudentProgress}
             onDeleteStudent={handleDeleteStudent}
+            onBatchDeleteStudents={handleBatchDeleteStudents}
             onSaveQuestion={handleSaveQuestion}
             onDeleteQuestion={handleDeleteQuestion}
             onBatchSaveQuestions={handleBatchSaveQuestions}

@@ -68,6 +68,7 @@ interface TeacherPortalProps {
   ) => Promise<void>;
   onResetStudentProgress: (userId: string) => Promise<void>;
   onDeleteStudent: (userId: string) => Promise<void>;
+  onBatchDeleteStudents: (userIds: string[]) => Promise<void>;
   onSaveQuestion: (question: Question) => Promise<void>;
   onDeleteQuestion: (questionId: string) => Promise<void>;
   onBatchSaveQuestions: (
@@ -104,6 +105,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
   onUpdateStudentPassword,
   onResetStudentProgress,
   onDeleteStudent,
+  onBatchDeleteStudents,
   onSaveQuestion,
   onDeleteQuestion,
   onBatchSaveQuestions,
@@ -1604,6 +1606,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
         {/* TAB 3: QUẢN LÝ TÀI KHOẢN & TIẾN ĐỘ HỌC SINH */}
         {activeTab === 'students' && (
           <TeacherStudentManager
+            currentUser={currentUser}
             questions={questions}
             users={users}
             attempts={attempts}
@@ -1612,6 +1615,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({
             onUpdateStudentPassword={onUpdateStudentPassword}
             onResetStudentProgress={onResetStudentProgress}
             onDeleteStudent={onDeleteStudent}
+            onBatchDeleteStudents={onBatchDeleteStudents}
           />
         )}
 

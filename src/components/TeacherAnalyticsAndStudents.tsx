@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Award,
@@ -35,6 +35,13 @@ import {
   computeClassAnalytics,
   parseStudentsFromExcelBytes,
 } from '../utils/teacherAnalytics';
+import {
+  getDeletableAccountIds,
+  isAccountProtectedFromDelete,
+  pruneMissingSelection,
+  toggleAccountSelection,
+  toggleSelectAllIds,
+} from '../utils/accountSelection';
 import { QuestionRenderer } from './QuestionRenderer';
 import { formatStudyDuration } from './StudentPortal';
 
@@ -584,6 +591,7 @@ export const TeacherClassAnalytics: React.FC<TeacherClassAnalyticsProps> = ({
 // ============================================================================
 
 interface TeacherStudentManagerProps {
+  currentUser?: UserAccount;
   questions: Question[];
   users: UserAccount[];
   attempts: ExamAttempt[];
@@ -592,9 +600,11 @@ interface TeacherStudentManagerProps {
   onUpdateStudentPassword: (userId: string, newPassword: string) => Promise<void>;
   onResetStudentProgress: (userId: string) => Promise<void>;
   onDeleteStudent: (userId: string) => Promise<void>;
+  onBatchDeleteStudents?: (userIds: string[]) => Promise<void>;
 }
 
 export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
+  currentUser,
   questions,
   users,
   attempts,
@@ -603,6 +613,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
   onUpdateStudentPassword,
   onResetStudentProgress,
   onDeleteStudent,
+  onBatchDeleteStudents,
 }) => {
   const [newAccountRole, setNewAccountRole] = useState<UserRole>('student');
   const [newStudentId, setNewStudentId] = useState('');
@@ -637,9 +648,15 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
     useState<UserAccount | null>(null);
   const [deleteStudentTarget, setDeleteStudentTarget] =
     useState<UserAccount | null>(null);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
 
   const excelStudentInputRef = useRef<HTMLInputElement | null>(null);
+  const teacherSelectAllRef = useRef<HTMLInputElement | null>(null);
+  const studentSelectAllRef = useRef<HTMLInputElement | null>(null);
 
   const analytics = useMemo(
     () => computeClassAnalytics(questions, users, attempts),
@@ -693,6 +710,122 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
     const start = (safeStudentPage - 1) * STUDENT_PAGE_SIZE;
     return filteredStudentRows.slice(start, start + STUDENT_PAGE_SIZE);
   }, [filteredStudentRows, safeStudentPage]);
+
+  const allDeletableIdsSet = useMemo(
+    () => new Set(getDeletableAccountIds(users, currentUser?.id)),
+    [users, currentUser?.id]
+  );
+
+  // Tự động loại bỏ các tài khoản không còn tồn tại khỏi tập đã chọn
+  useEffect(() => {
+    setSelectedAccountIds((prev) => {
+      if (prev.size === 0) return prev;
+      const pruned = pruneMissingSelection(prev, allDeletableIdsSet);
+      return pruned.size === prev.size ? prev : pruned;
+    });
+  }, [allDeletableIdsSet]);
+
+  const deletableTeacherIds = useMemo(
+    () => getDeletableAccountIds(filteredTeachers, currentUser?.id),
+    [filteredTeachers, currentUser?.id]
+  );
+
+  const deletablePageStudentIds = useMemo(
+    () =>
+      getDeletableAccountIds(
+        paginatedStudentRows.map((r) => r.student),
+        currentUser?.id
+      ),
+    [paginatedStudentRows, currentUser?.id]
+  );
+
+  const deletableFilteredStudentIds = useMemo(
+    () =>
+      getDeletableAccountIds(
+        filteredStudentRows.map((r) => r.student),
+        currentUser?.id
+      ),
+    [filteredStudentRows, currentUser?.id]
+  );
+
+  const selectedAccounts = useMemo(
+    () =>
+      users.filter(
+        (u) =>
+          selectedAccountIds.has(u.id) &&
+          !isAccountProtectedFromDelete(u, currentUser?.id)
+      ),
+    [users, selectedAccountIds, currentUser?.id]
+  );
+
+  const selectedTeacherCount = useMemo(
+    () => selectedAccounts.filter((u) => u.role === 'teacher').length,
+    [selectedAccounts]
+  );
+  const selectedStudentCount = selectedAccounts.length - selectedTeacherCount;
+
+  const allVisibleTeachersSelected =
+    deletableTeacherIds.length > 0 &&
+    deletableTeacherIds.every((id) => selectedAccountIds.has(id));
+  const someVisibleTeachersSelected =
+    deletableTeacherIds.some((id) => selectedAccountIds.has(id)) &&
+    !allVisibleTeachersSelected;
+
+  const allPageStudentsSelected =
+    deletablePageStudentIds.length > 0 &&
+    deletablePageStudentIds.every((id) => selectedAccountIds.has(id));
+  const somePageStudentsSelected =
+    deletablePageStudentIds.some((id) => selectedAccountIds.has(id)) &&
+    !allPageStudentsSelected;
+
+  const allFilteredStudentsSelected =
+    deletableFilteredStudentIds.length > 0 &&
+    deletableFilteredStudentIds.every((id) => selectedAccountIds.has(id));
+
+  useEffect(() => {
+    if (teacherSelectAllRef.current) {
+      teacherSelectAllRef.current.indeterminate = someVisibleTeachersSelected;
+    }
+  }, [someVisibleTeachersSelected]);
+
+  useEffect(() => {
+    if (studentSelectAllRef.current) {
+      studentSelectAllRef.current.indeterminate = somePageStudentsSelected;
+    }
+  }, [somePageStudentsSelected]);
+
+  const handleToggleSingleAccount = (account: UserAccount) => {
+    const isProtected = isAccountProtectedFromDelete(account, currentUser?.id);
+    setSelectedAccountIds((prev) =>
+      toggleAccountSelection(prev, account.id, isProtected)
+    );
+  };
+
+  const handleToggleSelectAllTeachers = () => {
+    setSelectedAccountIds((prev) =>
+      toggleSelectAllIds(prev, deletableTeacherIds)
+    );
+  };
+
+  const handleToggleSelectPageStudents = () => {
+    setSelectedAccountIds((prev) =>
+      toggleSelectAllIds(prev, deletablePageStudentIds)
+    );
+  };
+
+  const handleSelectAllFilteredStudents = () => {
+    setSelectedAccountIds((prev) => {
+      const next = new Set(prev);
+      for (const id of deletableFilteredStudentIds) {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleClearSelection = () => {
+    setSelectedAccountIds(new Set());
+  };
 
   const handleSelectRoleForCreate = (role: UserRole) => {
     setNewAccountRole(role);
@@ -874,6 +1007,12 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
     setIsProcessingAction(true);
     try {
       await onDeleteStudent(deleteStudentTarget.id);
+      setSelectedAccountIds((prev) => {
+        if (!prev.has(deleteStudentTarget.id)) return prev;
+        const next = new Set(prev);
+        next.delete(deleteStudentTarget.id);
+        return next;
+      });
       setStatusBanner({
         type: 'success',
         text: `Đã xóa tài khoản ${
@@ -881,6 +1020,41 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
         } ${deleteStudentTarget.fullName} (${deleteStudentTarget.username}) khỏi hệ thống.`,
       });
       setDeleteStudentTarget(null);
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // Xác nhận Xóa hàng loạt nhiều tài khoản đã chọn
+  const handleConfirmBulkDelete = async () => {
+    const idsToDelete = selectedAccounts.map((acc) => acc.id);
+    if (idsToDelete.length === 0) {
+      setIsBulkDeleteModalOpen(false);
+      return;
+    }
+    setIsProcessingAction(true);
+    try {
+      if (onBatchDeleteStudents) {
+        await onBatchDeleteStudents(idsToDelete);
+      } else {
+        for (const uid of idsToDelete) {
+          await onDeleteStudent(uid);
+        }
+      }
+      setSelectedAccountIds(new Set());
+      setIsBulkDeleteModalOpen(false);
+      setStatusBanner({
+        type: 'success',
+        text: `Đã xóa thành công ${idsToDelete.length} tài khoản đã chọn khỏi hệ thống.`,
+      });
+    } catch (err) {
+      setStatusBanner({
+        type: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Không thể xóa danh sách tài khoản đã chọn. Vui lòng thử lại.',
+      });
     } finally {
       setIsProcessingAction(false);
     }
@@ -1175,12 +1349,84 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
           <input
             type="text"
             value={studentSearch}
-            onChange={(e) => setStudentSearch(e.target.value)}
+            onChange={(e) => {
+              setStudentSearch(e.target.value);
+              setStudentPage(1);
+            }}
             placeholder="Tìm Mã đăng nhập, Họ tên, Tổ hoặc Lớp..."
-            className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-300 bg-white text-slate-900"
+            className="w-full pl-9 pr-3 py-2 text-base sm:text-xs rounded-xl border border-slate-300 bg-white text-slate-900"
           />
         </div>
       </div>
+
+      {/* THANH THAO TÁC HÀNG LOẠT KHI ĐÃ CHỌN NHIỀU TÀI KHOẢN */}
+      {selectedAccounts.length > 0 && (
+        <div
+          data-testid="bulk-delete-accounts-bar"
+          className="fixed bottom-3 left-3 right-3 z-40 md:sticky md:top-3 md:bottom-auto md:left-auto md:right-auto md:z-20 p-3.5 sm:px-5 rounded-xl bg-rose-50 border border-rose-300 shadow-lg md:shadow-sm flex flex-wrap items-center justify-between gap-3"
+        >
+          <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+            <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-lg bg-rose-600 text-white font-bold tabular-nums">
+              {selectedAccounts.length}
+            </span>
+            <span className="font-bold text-rose-950">
+              Đã chọn {selectedAccounts.length} tài khoản
+            </span>
+            {(selectedTeacherCount > 0 || selectedStudentCount > 0) && (
+              <span className="text-xs text-rose-800/90">
+                (
+                {[
+                  selectedTeacherCount > 0
+                    ? `${selectedTeacherCount} Giáo viên`
+                    : null,
+                  selectedStudentCount > 0
+                    ? `${selectedStudentCount} Học sinh`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+                )
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {(accountRoleFilter === 'ALL' || accountRoleFilter === 'STUDENT') &&
+              deletableFilteredStudentIds.length >
+                deletablePageStudentIds.length &&
+              !allFilteredStudentsSelected && (
+                <button
+                  type="button"
+                  data-testid="select-all-filtered-students-btn"
+                  onClick={handleSelectAllFilteredStudents}
+                  className="min-h-[38px] px-3 py-1.5 rounded-lg border border-rose-300 bg-white hover:bg-rose-100 text-xs font-semibold text-rose-900 cursor-pointer transition-colors"
+                >
+                  Chọn tất cả {deletableFilteredStudentIds.length} HS đang lọc
+                </button>
+              )}
+
+            <button
+              type="button"
+              data-testid="clear-account-selection-btn"
+              onClick={handleClearSelection}
+              className="min-h-[38px] px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 cursor-pointer transition-colors"
+            >
+              Bỏ chọn
+            </button>
+
+            <button
+              type="button"
+              data-testid="open-bulk-delete-modal-btn"
+              disabled={isProcessingAction}
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              className="min-h-[38px] px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Xóa {selectedAccounts.length} tài khoản đã chọn</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* BẢNG 1: DANH SÁCH TÀI KHOẢN QUẢN TRỊ VIÊN / GIÁO VIÊN TỔ TOÁN - TIN */}
       {(accountRoleFilter === 'ALL' || accountRoleFilter === 'TEACHER') && (
@@ -1205,36 +1451,77 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
 
           {/* Giao diện thẻ xếp dọc cho điện thoại (< md) - Tài khoản Giáo viên */}
           <div className="md:hidden divide-y divide-slate-200">
+            {deletableTeacherIds.length > 0 && (
+              <div className="px-4 py-2.5 bg-slate-50/80 flex items-center justify-between gap-2 text-xs">
+                <label className="inline-flex items-center gap-2 font-semibold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleTeachersSelected}
+                    onChange={handleToggleSelectAllTeachers}
+                    aria-label="Chọn tất cả giáo viên có thể xóa"
+                    className="w-4 h-4 rounded accent-rose-600 cursor-pointer"
+                  />
+                  <span>
+                    Chọn tất cả giáo viên có thể xóa ({deletableTeacherIds.length})
+                  </span>
+                </label>
+              </div>
+            )}
             {filteredTeachers.map((teacher) => {
               const isRootAdmin =
                 teacher.id.toLowerCase() === 'admin' ||
                 teacher.username.toLowerCase() === 'admin';
+              const isProtected = isAccountProtectedFromDelete(
+                teacher,
+                currentUser?.id
+              );
+              const isSelected = selectedAccountIds.has(teacher.id);
               return (
                 <div
                   key={teacher.id}
                   data-testid={`mobile-teacher-card-${teacher.id}`}
-                  className="p-4 space-y-3"
+                  className={`p-4 space-y-3 transition-colors ${
+                    isSelected ? 'bg-rose-50/60' : ''
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-mono font-bold text-sm text-indigo-800">
-                          {teacher.username}
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      {!isProtected ? (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSingleAccount(teacher)}
+                          aria-label={`Chọn tài khoản giáo viên ${teacher.username}`}
+                          className="mt-1 w-4 h-4 rounded accent-rose-600 cursor-pointer shrink-0"
+                        />
+                      ) : (
+                        <span
+                          title="Tài khoản được bảo vệ"
+                          className="mt-0.5 w-4 h-4 inline-flex items-center justify-center text-amber-600 shrink-0"
+                        >
+                          <ShieldCheck className="w-4 h-4" />
                         </span>
-                        <span className="text-xs font-mono text-slate-400">
-                          (MK: {teacher.password})
-                        </span>
-                        {isRootAdmin && (
-                          <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-bold">
-                            Quản trị gốc
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono font-bold text-sm text-indigo-800">
+                            {teacher.username}
                           </span>
-                        )}
-                      </div>
-                      <div className="font-bold text-slate-900 text-sm mt-0.5">
-                        {teacher.fullName}
-                      </div>
-                      <div className="text-xs text-slate-600 mt-0.5">
-                        {teacher.className || 'Tổ Toán - Tin · Trường IGC Tây Ninh'}
+                          <span className="text-xs font-mono text-slate-400">
+                            (MK: {teacher.password})
+                          </span>
+                          {isRootAdmin && (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 text-[10px] font-bold">
+                              Quản trị gốc
+                            </span>
+                          )}
+                        </div>
+                        <div className="font-bold text-slate-900 text-sm mt-0.5">
+                          {teacher.fullName}
+                        </div>
+                        <div className="text-xs text-slate-600 mt-0.5">
+                          {teacher.className || 'Tổ Toán - Tin · Trường IGC Tây Ninh'}
+                        </div>
                       </div>
                     </div>
                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-50 border border-indigo-200 text-[11px] font-bold text-indigo-800 shrink-0">
@@ -1258,13 +1545,13 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                         setNewPasswordValue(teacher.password);
                       }}
                       className={`min-h-[44px] px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 cursor-pointer ${
-                        isRootAdmin ? 'col-span-2' : ''
+                        isProtected ? 'col-span-2' : ''
                       }`}
                     >
                       <KeyRound className="w-4 h-4" />
                       <span>Đặt lại mật khẩu</span>
                     </button>
-                    {!isRootAdmin && (
+                    {!isProtected && (
                       <button
                         type="button"
                         onClick={() => setDeleteStudentTarget(teacher)}
@@ -1284,6 +1571,19 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
+                  <th className="py-3 pl-4 pr-2 w-10">
+                    {deletableTeacherIds.length > 0 && (
+                      <input
+                        ref={teacherSelectAllRef}
+                        type="checkbox"
+                        data-testid="select-all-teachers-checkbox"
+                        checked={allVisibleTeachersSelected}
+                        onChange={handleToggleSelectAllTeachers}
+                        aria-label="Chọn tất cả giáo viên có thể xóa"
+                        className="w-4 h-4 rounded accent-rose-600 cursor-pointer align-middle"
+                      />
+                    )}
+                  </th>
                   <th className="py-3 px-4">Tài khoản (Username) & Họ tên</th>
                   <th className="py-3 px-4">Tổ chuyên môn / Đơn vị</th>
                   <th className="py-3 px-4">Phân quyền</th>
@@ -1296,8 +1596,37 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                   const isRootAdmin =
                     teacher.id.toLowerCase() === 'admin' ||
                     teacher.username.toLowerCase() === 'admin';
+                  const isProtected = isAccountProtectedFromDelete(
+                    teacher,
+                    currentUser?.id
+                  );
+                  const isSelected = selectedAccountIds.has(teacher.id);
                   return (
-                    <tr key={teacher.id} className="hover:bg-slate-50/80">
+                    <tr
+                      key={teacher.id}
+                      className={
+                        isSelected ? 'bg-rose-50/60' : 'hover:bg-slate-50/80'
+                      }
+                    >
+                      <td className="py-3.5 pl-4 pr-2 w-10">
+                        {!isProtected ? (
+                          <input
+                            type="checkbox"
+                            data-testid={`select-account-checkbox-${teacher.id}`}
+                            checked={isSelected}
+                            onChange={() => handleToggleSingleAccount(teacher)}
+                            aria-label={`Chọn tài khoản ${teacher.username}`}
+                            className="w-4 h-4 rounded accent-rose-600 cursor-pointer align-middle"
+                          />
+                        ) : (
+                          <span
+                            title="Tài khoản được bảo vệ không thể xóa"
+                            className="inline-flex items-center justify-center text-amber-600"
+                          >
+                            <ShieldCheck className="w-4 h-4" />
+                          </span>
+                        )}
+                      </td>
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-2">
                           <span className="font-mono font-bold text-indigo-800">
@@ -1350,7 +1679,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                             <span>Đổi MK</span>
                           </button>
 
-                          {!isRootAdmin && (
+                          {!isProtected && (
                             <button
                               type="button"
                               data-testid={`delete-teacher-${teacher.id}`}
@@ -1452,6 +1781,31 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
           data-testid="mobile-student-cards-list"
           className="md:hidden divide-y divide-slate-200"
         >
+          {paginatedStudentRows.length > 0 && (
+            <div className="px-4 py-2.5 bg-slate-50/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <label className="inline-flex items-center gap-2 font-semibold text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allPageStudentsSelected}
+                  onChange={handleToggleSelectPageStudents}
+                  aria-label="Chọn tất cả học sinh trang này"
+                  className="w-4 h-4 rounded accent-rose-600 cursor-pointer"
+                />
+                <span>Chọn trang này ({deletablePageStudentIds.length})</span>
+              </label>
+              {deletableFilteredStudentIds.length >
+                deletablePageStudentIds.length &&
+                !allFilteredStudentsSelected && (
+                  <button
+                    type="button"
+                    onClick={handleSelectAllFilteredStudents}
+                    className="text-xs font-bold text-rose-700 hover:underline cursor-pointer"
+                  >
+                    Chọn tất cả {deletableFilteredStudentIds.length} HS
+                  </button>
+                )}
+            </div>
+          )}
           {paginatedStudentRows.length === 0 ? (
             <div className="p-8 text-center text-xs text-slate-500">
               Không tìm thấy tài khoản học sinh nào khớp với bộ lọc.
@@ -1459,6 +1813,7 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
           ) : (
             paginatedStudentRows.map((row) => {
               const st = row.student;
+              const isSelected = selectedAccountIds.has(st.id);
               const isOnline =
                 st.activeStatus === 'studying' ||
                 st.activeStatus === 'online' ||
@@ -1469,23 +1824,34 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                 <div
                   key={st.id}
                   data-testid="mobile-student-card"
-                  className="p-4 space-y-3 tabular-nums"
+                  className={`p-4 space-y-3 tabular-nums transition-colors ${
+                    isSelected ? 'bg-rose-50/60' : ''
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-mono font-bold text-sm text-teal-800">
-                          {st.username}
-                        </span>
-                        <span className="text-xs font-mono text-slate-400">
-                          (MK: {st.password})
-                        </span>
-                      </div>
-                      <div className="font-bold text-slate-900 text-sm mt-0.5">
-                        {st.fullName}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        {st.className || 'Lớp Luyện thi Certiport'}
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleSingleAccount(st)}
+                        aria-label={`Chọn tài khoản học sinh ${st.username}`}
+                        className="mt-1 w-4 h-4 rounded accent-rose-600 cursor-pointer shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono font-bold text-sm text-teal-800">
+                            {st.username}
+                          </span>
+                          <span className="text-xs font-mono text-slate-400">
+                            (MK: {st.password})
+                          </span>
+                        </div>
+                        <div className="font-bold text-slate-900 text-sm mt-0.5">
+                          {st.fullName}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {st.className || 'Lớp Luyện thi Certiport'}
+                        </div>
                       </div>
                     </div>
 
@@ -1592,6 +1958,19 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600">
+                <th className="py-3 pl-4 pr-2 w-10">
+                  {deletablePageStudentIds.length > 0 && (
+                    <input
+                      ref={studentSelectAllRef}
+                      type="checkbox"
+                      data-testid="select-all-page-students-checkbox"
+                      checked={allPageStudentsSelected}
+                      onChange={handleToggleSelectPageStudents}
+                      aria-label="Chọn tất cả học sinh trang này"
+                      className="w-4 h-4 rounded accent-rose-600 cursor-pointer align-middle"
+                    />
+                  )}
+                </th>
                 <th className="py-3 px-4">Mã HS & Họ tên</th>
                 <th className="py-3 px-4">Trạng thái & Đăng nhập gần nhất</th>
                 <th className="py-3 px-4">Tổng TG ôn tập</th>
@@ -1603,8 +1982,19 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 text-sm tabular-nums">
-              {paginatedStudentRows.map((row) => {
+              {paginatedStudentRows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="py-10 px-4 text-center text-xs text-slate-500"
+                  >
+                    Không tìm thấy tài khoản học sinh nào khớp với bộ lọc.
+                  </td>
+                </tr>
+              ) : (
+              paginatedStudentRows.map((row) => {
                 const st = row.student;
+                const isSelected = selectedAccountIds.has(st.id);
                 const isOnline =
                   st.activeStatus === 'studying' ||
                   st.activeStatus === 'online' ||
@@ -1612,7 +2002,22 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                   st.status === 'online';
 
                 return (
-                  <tr key={st.id} className="hover:bg-slate-50/80">
+                  <tr
+                    key={st.id}
+                    className={
+                      isSelected ? 'bg-rose-50/60' : 'hover:bg-slate-50/80'
+                    }
+                  >
+                    <td className="py-3.5 pl-4 pr-2 w-10">
+                      <input
+                        type="checkbox"
+                        data-testid={`select-account-checkbox-${st.id}`}
+                        checked={isSelected}
+                        onChange={() => handleToggleSingleAccount(st)}
+                        aria-label={`Chọn tài khoản ${st.username}`}
+                        className="w-4 h-4 rounded accent-rose-600 cursor-pointer align-middle"
+                      />
+                    </td>
                     <td className="py-3.5 px-4">
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-teal-800">
@@ -1739,7 +2144,8 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                     </td>
                   </tr>
                 );
-              })}
+              })
+              )}
             </tbody>
           </table>
         </div>
@@ -2154,6 +2560,93 @@ export const TeacherStudentManager: React.FC<TeacherStudentManagerProps> = ({
                 className="min-h-[44px] px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
               >
                 {isProcessingAction ? 'Đang xóa...' : 'Xóa tài khoản'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: XÁC NHẬN XÓA NHIỀU TÀI KHOẢN ĐÃ CHỌN */}
+      {isBulkDeleteModalOpen && selectedAccounts.length > 0 && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bulk-delete-accounts-modal-title"
+          data-testid="bulk-delete-accounts-modal"
+          className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+        >
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full max-h-[90dvh] flex flex-col overflow-hidden shadow-xl">
+            <div className="p-5 sm:p-6 space-y-4 overflow-y-auto overscroll-contain flex-1 min-h-0">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h3
+                    id="bulk-delete-accounts-modal-title"
+                    className="text-base font-bold text-slate-900"
+                  >
+                    Xác nhận xóa {selectedAccounts.length} tài khoản đã chọn?
+                  </h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Các tài khoản dưới đây sẽ bị xóa vĩnh viễn khỏi hệ thống và không thể đăng nhập được nữa. Ngân hàng câu hỏi và tài khoản quản trị gốc vẫn được giữ nguyên.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 divide-y divide-slate-200/80 max-h-60 overflow-y-auto">
+                {selectedAccounts.slice(0, 30).map((acc) => (
+                  <div
+                    key={acc.id}
+                    className="px-3.5 py-2 flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <span className="font-mono font-bold text-slate-900">
+                        {acc.username}
+                      </span>{' '}
+                      <span className="text-slate-600">— {acc.fullName}</span>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                        acc.role === 'teacher'
+                          ? 'bg-indigo-100 text-indigo-800'
+                          : 'bg-teal-100 text-teal-800'
+                      }`}
+                    >
+                      {acc.role === 'teacher'
+                        ? 'Giáo viên'
+                        : acc.className || 'Học sinh'}
+                    </span>
+                  </div>
+                ))}
+                {selectedAccounts.length > 30 && (
+                  <div className="px-3.5 py-2 text-xs font-semibold text-slate-500 text-center">
+                    ...và còn {selectedAccounts.length - 30} tài khoản khác
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 px-5 sm:px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5 shrink-0">
+              <button
+                type="button"
+                disabled={isProcessingAction}
+                onClick={() => setIsBulkDeleteModalOpen(false)}
+                className="min-h-[44px] px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                data-testid="confirm-bulk-delete-accounts-btn"
+                disabled={isProcessingAction}
+                onClick={handleConfirmBulkDelete}
+                className="min-h-[44px] px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>
+                  {isProcessingAction
+                    ? 'Đang xóa...'
+                    : `Xóa ${selectedAccounts.length} tài khoản`}
+                </span>
               </button>
             </div>
           </div>
