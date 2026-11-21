@@ -6,6 +6,7 @@ import {
   QuestionType,
   UserAccount,
 } from '../types/exam';
+import { loadXlsx } from './loadXlsx';
 
 export interface StudentProgressSummary {
   student: UserAccount;
@@ -372,7 +373,7 @@ export function computeClassAnalytics(
 // ============================================================================
 
 export async function buildSampleStudentImportExcelBytes(): Promise<Uint8Array> {
-  const XLSX = await import('xlsx');
+  const XLSX = await loadXlsx();
   const wb = XLSX.utils.book_new();
   const sampleStudents = [
     {
@@ -414,7 +415,7 @@ function getField(row: Record<string, unknown>, keys: string[]): string {
 export async function parseStudentsFromExcelBytes(
   bytes: ArrayBuffer | Uint8Array
 ): Promise<UserAccount[]> {
-  const XLSX = await import('xlsx');
+  const XLSX = await loadXlsx();
   const wb = XLSX.read(bytes, { type: 'array' });
   const firstSheet = wb.SheetNames[0];
   if (!firstSheet) {
@@ -509,7 +510,7 @@ export async function buildClassReportWorkbookBytes(
   users: UserAccount[],
   attempts: ExamAttempt[]
 ): Promise<Uint8Array> {
-  const XLSX = await import('xlsx');
+  const XLSX = await loadXlsx();
   const analytics = computeClassAnalytics(questions, users, attempts);
   const wb = XLSX.utils.book_new();
 

@@ -6,6 +6,15 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    optimizeDeps: {
+      include: [
+        'xlsx',
+        'lucide-react',
+        'firebase/app',
+        'firebase/auth',
+        'firebase/firestore',
+      ],
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

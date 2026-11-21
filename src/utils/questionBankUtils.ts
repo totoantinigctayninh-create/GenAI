@@ -8,6 +8,7 @@ import {
   QuestionType,
 } from '../types/exam';
 import { evaluateQuestion } from './scoring';
+import { loadXlsx } from './loadXlsx';
 
 export type DistributionStrategy = 'by_size' | 'by_set_count';
 
@@ -1029,7 +1030,7 @@ export function parseQuestionsFromExcelRows(rows: Record<string, unknown>[]): Qu
  * Tạo mảng byte `.xlsx` cho File Excel Mẫu (kèm sheet Hướng dẫn nhập liệu chi tiết)
  */
 export async function buildSampleExcelWorkbookBytes(): Promise<Uint8Array> {
-  const XLSX = await import('xlsx');
+  const XLSX = await loadXlsx();
   const wb = XLSX.utils.book_new();
   const sampleRows = buildSampleExcelRows();
   const wsQuestions = XLSX.utils.json_to_sheet(sampleRows);
@@ -1099,7 +1100,7 @@ export async function buildSampleExcelWorkbookBytes(): Promise<Uint8Array> {
 export async function exportQuestionsToExcelBytes(
   questions: Question[]
 ): Promise<Uint8Array> {
-  const XLSX = await import('xlsx');
+  const XLSX = await loadXlsx();
   const wb = XLSX.utils.book_new();
   const rows = questionsToExcelRows(questions);
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -1126,7 +1127,7 @@ export async function exportQuestionsToExcelBytes(
 export async function parseQuestionsFromExcelBytes(
   bytes: ArrayBuffer | Uint8Array
 ): Promise<Question[]> {
-  const XLSX = await import('xlsx');
+  const XLSX = await loadXlsx();
   const wb = XLSX.read(bytes, { type: 'array' });
   const firstSheetName = wb.SheetNames[0];
   if (!firstSheetName) {

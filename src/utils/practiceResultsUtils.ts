@@ -6,6 +6,7 @@ import {
   UserAccount,
   UserAnswer,
 } from '../types/exam';
+import { loadXlsx } from './loadXlsx';
 
 export type PracticeAttemptSource = 'practice' | 'live_session';
 export type PracticeResultFilter = 'ALL' | 'PASS' | 'FAIL';
@@ -501,7 +502,7 @@ export async function buildPracticeResultsExcelBytes(
   rows: EnrichedPracticeAttempt[],
   analytics: PracticeAnalyticsSummary
 ): Promise<Uint8Array> {
-  const XLSX = await import('xlsx');
+  const XLSX = await loadXlsx();
   const wb = XLSX.utils.book_new();
 
   // Sheet 1: Chi tiết các lượt thi theo bộ lọc

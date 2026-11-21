@@ -11,6 +11,7 @@ import {
   ViolationEventRecord,
   ViolationEventType,
 } from '../types/examSession';
+import { loadXlsx } from './loadXlsx';
 
 export interface TopicShortDefinition {
   canonicalTopic: string;
@@ -900,7 +901,7 @@ export async function buildSessionResultsExcelBytes(params: {
   questionAnalysis: SessionQuestionAnalysisItem[];
   violations: ViolationEventRecord[];
 }): Promise<Uint8Array> {
-  const XLSX = await import('xlsx');
+  const XLSX = await loadXlsx();
   const wb = XLSX.utils.book_new();
 
   // Sheet 1: Bảng điểm
@@ -1036,7 +1037,7 @@ export async function parseSessionResultsExcelBytes(bytes: Uint8Array): Promise<
   questionSheet: Array<Record<string, unknown>>;
   violationSheet: Array<Record<string, unknown>>;
 }> {
-  const XLSX = await import('xlsx');
+  const XLSX = await loadXlsx();
   const wb = XLSX.read(bytes, { type: 'array' });
   const scoreSheet = wb.Sheets['Bảng điểm']
     ? (XLSX.utils.sheet_to_json(wb.Sheets['Bảng điểm']) as Array<
