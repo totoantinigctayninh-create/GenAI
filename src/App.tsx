@@ -19,9 +19,7 @@ import {
   isLegacyVirtualAttempt,
   isLegacyVirtualQuestion,
   isLegacyVirtualUser,
-  markQuestionMasteredInFirestore,
   recordExamAttempt,
-  recordQuestionPracticeResultInFirestore,
   resetSeedDataToDefault,
   resetStudentLearningDataInFirestore,
   saveMultipleQuestionsToFirestore,
@@ -34,12 +32,9 @@ import {
   subscribeToSingleUser,
   subscribeToUserAttempts,
   subscribeToUsers,
-  syncExamWrongQuestionsToFirestore,
   testFirestoreConnection,
-  toggleQuestionBookmarkInFirestore,
   updateDepartmentLogoInFirestore,
   updateStudentPasswordInFirestore,
-  updateUserActivityAndStudyTime,
 } from './services/firebase';
 import { ExamAttempt, Question, UserAccount } from './types/exam';
 import {
@@ -48,10 +43,19 @@ import {
   resolveDepartmentLogoUrl,
 } from './utils/branding';
 import {
+  applyLocalBookmarkToggle,
+  applyLocalExamWrongQuestions,
+  applyLocalMarkMastered,
+  applyLocalPracticeCheck,
+  applyLocalPracticeStateToUser,
+  applyLocalStudyTimeDelta,
+  clearLocalPracticeState,
+  mergeUserWithLocalPractice,
+} from './utils/localPracticeStorage';
+import {
   compressLogoFileToBase64,
   ensureCompactLogoDataUrl,
 } from './utils/questionBankUtils';
-import { computeUpdatedWrongQuestions } from './utils/scoring';
 import { appDataApi } from './services/appDataApi';
 import { examSessionApi } from './services/examSessionApi';
 
@@ -245,7 +249,7 @@ export default function App() {
       if (cancelled) return;
       if (res.status === 'valid') {
         setExpressApiMode('express');
-        setAuthenticatedUserSnapshot(res.user);
+        setAuthenticatedUserSnapshot(mergeUserWithLocalPractice(res.user));
       } else if (res.status === 'quota_exceeded') {
         setExpressApiMode('express');
         setAuthenticatedUserSnapshot(null);
@@ -328,9 +332,12 @@ export default function App() {
         }
 
         setExpressApiMode('express');
-        setAuthenticatedUserSnapshot(payload.currentUser);
-        setSingleUserDoc(payload.currentUser);
-        setUsers(payload.users);
+        const mergedCurrentUser = mergeUserWithLocalPractice(payload.currentUser);
+        setAuthenticatedUserSnapshot(mergedCurrentUser);
+        setSingleUserDoc(mergedCurrentUser);
+        setUsers(
+          payload.role === 'student' ? [mergedCurrentUser] : payload.users
+        );
         setAttempts(payload.attempts);
 
         if (options?.mode === 'live-exam') {
@@ -395,8 +402,9 @@ export default function App() {
     if (!isConfirmedTeacher) {
       const unsubSingleUser = subscribeToSingleUser(activeUserId, (liveUser) => {
         if (!isMounted) return;
-        setSingleUserDoc(liveUser);
-        setUsers(liveUser ? [liveUser] : []);
+        const mergedLiveUser = liveUser ? mergeUserWithLocalPractice(liveUser) : null;
+        setSingleUserDoc(mergedLiveUser);
+        setUsers(mergedLiveUser ? [mergedLiveUser] : []);
       });
 
       return () => {
@@ -491,7 +499,7 @@ export default function App() {
       }
 
       if (activeUserId === 'student_preview' || roleParam === 'student') {
-        return {
+        return mergeUserWithLocalPractice({
           id: activeUserId,
           username: activeUserId === 'student_preview' ? 'HocSinh' : activeUserId,
           password: '',
@@ -510,7 +518,7 @@ export default function App() {
           wrongQuestions: [],
           masteredQuestions: [],
           practiceProgress: {},
-        };
+        });
       }
     }
 
@@ -689,25 +697,6 @@ export default function App() {
     []
   );
 
-  const syncUserFromServerSnapshot = useCallback((updatedUser?: UserAccount) => {
-    if (!updatedUser) return;
-    const targetLower = updatedUser.id.toLowerCase();
-    setUsers((prev) => {
-      const exists = prev.some((u) => u.id.toLowerCase() === targetLower);
-      return exists
-        ? prev.map((u) =>
-            u.id.toLowerCase() === targetLower ? updatedUser : u
-          )
-        : [updatedUser];
-    });
-    setSingleUserDoc((prev) =>
-      prev && prev.id.toLowerCase() === targetLower ? updatedUser : prev
-    );
-    setAuthenticatedUserSnapshot((prev) =>
-      prev && prev.id.toLowerCase() === targetLower ? updatedUser : prev
-    );
-  }, []);
-
   const handleLogin = useCallback(
     async (username: string, password: string) => {
       setLoginError(null);
@@ -720,7 +709,7 @@ export default function App() {
         if (serverAuth) {
           setExpressApiMode('express');
           authenticated = serverAuth.user;
-          // Express /api/auth/login đã cập nhật trạng thái online/studying vào RAM + Firestore -> không gọi Firestore phía trình duyệt
+          // Express /api/auth/login chỉ cập nhật trạng thái trong RAM (0 lượt ghi Firestore)
         } else {
           // Dự phòng khi chạy trên môi trường tĩnh không có backend Express
           setExpressApiMode('fallback');
@@ -731,12 +720,13 @@ export default function App() {
           );
         }
 
-        setAuthenticatedUserSnapshot(authenticated);
-        setSingleUserDoc(authenticated);
-        setActiveUserId(authenticated.id);
+        const mergedAuth = mergeUserWithLocalPractice(authenticated);
+        setAuthenticatedUserSnapshot(mergedAuth);
+        setSingleUserDoc(mergedAuth);
+        setActiveUserId(mergedAuth.id);
         setIsLiveExamMode(false);
         try {
-          localStorage.setItem(SESSION_STORAGE_KEY, authenticated.id);
+          localStorage.setItem(SESSION_STORAGE_KEY, mergedAuth.id);
         } catch {
           // Bỏ qua
         }
@@ -754,8 +744,8 @@ export default function App() {
   );
 
   const handleLogout = useCallback(async () => {
-    const uid = activeUserId;
-    const usedExpress = expressApiMode !== 'fallback' && Boolean(examSessionApi.getAuthToken());
+    const usedExpress =
+      expressApiMode !== 'fallback' && Boolean(examSessionApi.getAuthToken());
 
     if (usedExpress) {
       try {
@@ -782,58 +772,28 @@ export default function App() {
     } catch {
       // Bỏ qua
     }
-    if (uid && !usedExpress) {
-      await updateUserActivityAndStudyTime(uid, 'offline', 0);
-    }
-  }, [activeUserId, expressApiMode]);
+  }, [expressApiMode]);
 
+  // Chế độ Luyện tập = 0 lượt ghi Firestore: chỉ lưu thời gian ôn tập cục bộ theo từng mã học sinh trong localStorage
   const handleSyncStudyTime = useCallback(
     async (additionalSeconds: number) => {
       if (
         !activeUserId ||
+        !currentUser ||
         additionalSeconds <= 0 ||
         activeUserId.toLowerCase() === 'admin' ||
-        currentUser?.role === 'teacher'
+        currentUser.role === 'teacher'
       ) {
         return;
       }
       const nowIso = new Date().toISOString();
-      applyLocalUserUpdate(activeUserId, (u) => {
-        const nextSec = (u.totalStudySeconds || 0) + additionalSeconds;
-        return {
-          ...u,
-          totalStudySeconds: nextSec,
-          totalStudyMinutes: Math.round(nextSec / 60),
-          lastLogin: nowIso,
-        };
-      });
-
-      if (expressApiMode !== 'fallback') {
-        try {
-          const res = await appDataApi.syncStudyTime(additionalSeconds, 'studying');
-          if (res) {
-            syncUserFromServerSnapshot(res.user);
-            return;
-          }
-        } catch (err) {
-          console.warn('Study-time sync notice:', err);
-          return;
-        }
-      }
-
-      await updateUserActivityAndStudyTime(
-        activeUserId,
-        'studying',
-        additionalSeconds
-      );
+      const nextLocal = applyLocalStudyTimeDelta(currentUser, additionalSeconds);
+      applyLocalUserUpdate(activeUserId, (u) => ({
+        ...applyLocalPracticeStateToUser(u, nextLocal),
+        lastLogin: nowIso,
+      }));
     },
-    [
-      activeUserId,
-      currentUser,
-      expressApiMode,
-      applyLocalUserUpdate,
-      syncUserFromServerSnapshot,
-    ]
+    [activeUserId, currentUser, applyLocalUserUpdate]
   );
 
   const canManageDepartmentLogo = useMemo(
@@ -888,38 +848,18 @@ export default function App() {
     [currentUser, expressApiMode, applyDepartmentLogoState]
   );
 
-  // Optimistic + Write-Through sync cho Bookmark
+  // Chế độ Luyện tập = 0 lượt ghi Firestore: lưu Bookmark trực tiếp vào localStorage theo từng học sinh
   const handleToggleBookmark = useCallback(
     async (questionId: string) => {
       if (!currentUser) return;
       const uid = currentUser.id;
-      applyLocalUserUpdate(uid, (u) => {
-        const cur = u.bookmarkedQuestions ?? [];
-        const next = cur.includes(questionId)
-          ? cur.filter((id) => id !== questionId)
-          : [...cur, questionId];
-        return { ...u, bookmarkedQuestions: next };
-      });
-
-      if (expressApiMode !== 'fallback') {
-        try {
-          const res = await appDataApi.toggleBookmark(questionId);
-          if (res) {
-            syncUserFromServerSnapshot(res.user);
-            return;
-          }
-        } catch (err) {
-          console.warn('Bookmark sync notice:', err);
-          return;
-        }
-      }
-
-      await toggleQuestionBookmarkInFirestore(uid, questionId);
+      const nextLocal = applyLocalBookmarkToggle(currentUser, questionId);
+      applyLocalUserUpdate(uid, (u) => applyLocalPracticeStateToUser(u, nextLocal));
     },
-    [currentUser, expressApiMode, applyLocalUserUpdate, syncUserFromServerSnapshot]
+    [currentUser, applyLocalUserUpdate]
   );
 
-  // Optimistic + Write-Through sync khi học sinh bấm "Kiểm tra đáp án"
+  // Chế độ Luyện tập = 0 lượt ghi Firestore: lưu kết quả "Kiểm tra đáp án" & Kho câu sai trực tiếp vào localStorage
   const handleRecordPracticeCheck = useCallback(
     async (
       questionId: string,
@@ -928,117 +868,42 @@ export default function App() {
     ) => {
       if (!currentUser) return;
       const uid = currentUser.id;
-      applyLocalUserUpdate(uid, (u) => {
-        const { wrongQuestions, masteredQuestions } =
-          computeUpdatedWrongQuestions(
-            u.wrongQuestions ?? [],
-            u.masteredQuestions ?? [],
-            questionId,
-            isCorrect,
-            removeOnCorrect
-          );
-        const prevProg = u.practiceProgress ?? {};
-        const prevItem = prevProg[questionId];
-        return {
-          ...u,
-          wrongQuestions,
-          masteredQuestions,
-          practiceProgress: {
-            ...prevProg,
-            [questionId]: {
-              answeredAt: new Date().toISOString(),
-              isCorrect,
-              attemptsCount: (prevItem?.attemptsCount ?? 0) + 1,
-            },
-          },
-        };
-      });
-
-      if (expressApiMode !== 'fallback') {
-        try {
-          const res = await appDataApi.recordPracticeCheck(
-            questionId,
-            isCorrect,
-            removeOnCorrect
-          );
-          if (res) {
-            syncUserFromServerSnapshot(res.user);
-            return;
-          }
-        } catch (err) {
-          console.warn('Practice check sync notice:', err);
-          return;
-        }
-      }
-
-      await recordQuestionPracticeResultInFirestore(
-        uid,
+      const nextLocal = applyLocalPracticeCheck(
+        currentUser,
         questionId,
         isCorrect,
         removeOnCorrect
       );
+      applyLocalUserUpdate(uid, (u) => applyLocalPracticeStateToUser(u, nextLocal));
     },
-    [currentUser, expressApiMode, applyLocalUserUpdate, syncUserFromServerSnapshot]
+    [currentUser, applyLocalUserUpdate]
   );
 
-  // Optimistic + Write-Through sync khi học sinh bấm "Đã nắm vững (Xóa khỏi kho câu sai)"
+  // Chế độ Luyện tập = 0 lượt ghi Firestore: đánh dấu "Đã nắm vững" trực tiếp vào localStorage
   const handleMarkQuestionMastered = useCallback(
     async (questionId: string) => {
       if (!currentUser) return;
       const uid = currentUser.id;
-      applyLocalUserUpdate(uid, (u) => {
-        const { wrongQuestions, masteredQuestions } =
-          computeUpdatedWrongQuestions(
-            u.wrongQuestions ?? [],
-            u.masteredQuestions ?? [],
-            questionId,
-            true,
-            true
-          );
-        return {
-          ...u,
-          wrongQuestions,
-          masteredQuestions,
-        };
-      });
-
-      if (expressApiMode !== 'fallback') {
-        try {
-          const res = await appDataApi.markMastered(questionId);
-          if (res) {
-            syncUserFromServerSnapshot(res.user);
-            return;
-          }
-        } catch (err) {
-          console.warn('Mark mastered sync notice:', err);
-          return;
-        }
-      }
-
-      await markQuestionMasteredInFirestore(uid, questionId);
+      const nextLocal = applyLocalMarkMastered(currentUser, questionId);
+      applyLocalUserUpdate(uid, (u) => applyLocalPracticeStateToUser(u, nextLocal));
     },
-    [currentUser, expressApiMode, applyLocalUserUpdate, syncUserFromServerSnapshot]
+    [currentUser, applyLocalUserUpdate]
   );
 
+  // Nộp bài Thi thử = đúng 1 lượt ghi Firestore duy nhất (attempts/{attempt.id}); câu sai & thời gian gộp cục bộ vào localStorage
   const handleSaveAttempt = useCallback(
     async (attempt: ExamAttempt, wrongQuestionIdsFromExam: string[]) => {
       setAttempts((prev) => [attempt, ...prev]);
 
       if (currentUser && currentUser.role === 'student') {
-        applyLocalUserUpdate(currentUser.id, (u) => {
-          const wrongSet = new Set([
-            ...(u.wrongQuestions ?? []),
-            ...wrongQuestionIdsFromExam,
-          ]);
-          const nextSec =
-            (u.totalStudySeconds || 0) + Math.max(0, attempt.durationSeconds || 0);
-          return {
-            ...u,
-            wrongQuestions: Array.from(wrongSet),
-            totalStudySeconds: nextSec,
-            totalStudyMinutes: Math.round(nextSec / 60),
-          };
-        });
+        const nextLocal = applyLocalExamWrongQuestions(
+          currentUser,
+          wrongQuestionIdsFromExam,
+          attempt.durationSeconds
+        );
+        applyLocalUserUpdate(currentUser.id, (u) =>
+          applyLocalPracticeStateToUser(u, nextLocal)
+        );
       }
 
       if (expressApiMode !== 'fallback') {
@@ -1048,7 +913,6 @@ export default function App() {
             wrongQuestionIdsFromExam
           );
           if (res) {
-            syncUserFromServerSnapshot(res.user);
             return;
           }
         } catch (err) {
@@ -1058,21 +922,8 @@ export default function App() {
       }
 
       await recordExamAttempt(attempt);
-      if (currentUser && currentUser.role === 'student') {
-        if (wrongQuestionIdsFromExam.length > 0) {
-          await syncExamWrongQuestionsToFirestore(
-            currentUser.id,
-            wrongQuestionIdsFromExam
-          );
-        }
-        await updateUserActivityAndStudyTime(
-          currentUser.id,
-          'studying',
-          attempt.durationSeconds
-        );
-      }
     },
-    [currentUser, expressApiMode, applyLocalUserUpdate, syncUserFromServerSnapshot]
+    [currentUser, expressApiMode, applyLocalUserUpdate]
   );
 
   const handleSaveStudent = useCallback(
@@ -1128,6 +979,7 @@ export default function App() {
 
   const handleResetStudentProgress = useCallback(
     async (userId: string) => {
+      const resetAt = new Date().toISOString();
       const attemptIdsToDelete = attempts
         .filter(
           (a) =>
@@ -1136,6 +988,7 @@ export default function App() {
         )
         .map((a) => a.id);
 
+      clearLocalPracticeState(userId);
       setUsers((prev) =>
         prev.map((u) =>
           u.id === userId
@@ -1147,6 +1000,7 @@ export default function App() {
                 wrongQuestions: [],
                 masteredQuestions: [],
                 practiceProgress: {},
+                progressResetAt: resetAt,
               }
             : u
         )

@@ -244,8 +244,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     });
   };
 
-  const STUDY_SYNC_INTERVAL_SECONDS = 180;
-  const STUDY_MIN_FLUSH_SECONDS = 15;
+  // Lưu thời gian ôn tập cục bộ vào localStorage (0 lượt ghi Firestore/mạng) mỗi 15 giây
+  const STUDY_SYNC_INTERVAL_SECONDS = 15;
+  const STUDY_MIN_FLUSH_SECONDS = 5;
 
   const flushUnsyncedStudyTime = React.useCallback(
     async (minSeconds: number) => {
@@ -257,14 +258,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       try {
         await onSyncStudyTime(pending);
       } catch {
-        // Bỏ qua lỗi mạng tạm thời
+        // Bỏ qua lỗi lưu cục bộ nếu có
       }
     },
     [onSyncStudyTime]
   );
 
   // Đồng hồ đếm thời gian ôn tập thực tế (tạm dừng hoàn toàn khi đang ở tab "Thi ngay")
-  // và chỉ đồng bộ lên Firestore mỗi 180 giây (3 phút) để tối ưu băng thông cho 150–300 học sinh
+  // Ghi hoàn toàn cục bộ vào localStorage theo mã học sinh (0 lượt ghi Firestore)
   useEffect(() => {
     if (activeTab === 'live-exam') {
       return;
@@ -286,7 +287,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     return () => window.clearInterval(timer);
   }, [activeTab, onSyncStudyTime]);
 
-  // Đẩy phần thời gian ôn tập còn lại (nếu >= 15 giây) khi học sinh ẩn tab hoặc đóng trang
+  // Lưu phần thời gian ôn tập còn lại (nếu >= 5 giây) vào localStorage khi học sinh ẩn tab hoặc đóng trang
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {

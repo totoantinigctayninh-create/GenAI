@@ -190,6 +190,16 @@ export interface SessionAttemptRecord {
   typeBreakdown?: BreakdownStatItem[];
   /** Chi tiết từng câu hỏi kèm đáp án đúng, phương án học sinh chọn và thời gian làm từng câu (chỉ trả về cho Giáo viên ở trang Kết quả 7B) */
   teacherQuestionDetails?: TeacherAttemptQuestionDetail[];
+  /** Bản gộp toàn bộ đáp án của lượt thi vào cùng 1 tài liệu attempts/{id} (checkpoint 20 phút & khi nộp bài) */
+  savedAnswers?: Record<string, BundledAttemptAnswer>;
+}
+
+export interface BundledAttemptAnswer {
+  questionId: string;
+  selectedAnswer: UserAnswer | null;
+  savedAt: string;
+  timeSpentSeconds: number;
+  flagged: boolean;
 }
 
 export interface TeacherAttemptQuestionDetail {

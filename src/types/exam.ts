@@ -29,6 +29,7 @@ export interface UserAccount {
   practiceProgress?: Record<string, PracticeQuestionStat>;
   logoUrl?: string;
   createdAt?: string;
+  progressResetAt?: string;
 }
 
 export type QuestionType =

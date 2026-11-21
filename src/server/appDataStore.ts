@@ -275,6 +275,7 @@ export class ServerAppDataStore {
     });
   }
 
+  // Cập nhật trạng thái hoạt động ngay trong RAM (0 lượt ghi Firestore)
   public recordUserLoginActivity(userId: string): UserAccount | undefined {
     const current = this.getUser(userId);
     if (!current) return undefined;
@@ -288,7 +289,6 @@ export class ServerAppDataStore {
       activeStatus: nextStatus,
     };
     this.engine.upsertUser(updated);
-    this.fireAndForgetPersist(this.persistence.saveUser(updated));
     return updated;
   }
 
@@ -301,9 +301,9 @@ export class ServerAppDataStore {
       activeStatus: 'offline',
     };
     this.engine.upsertUser(updated);
-    this.fireAndForgetPersist(this.persistence.saveUser(updated));
   }
 
+  // Chế độ Luyện tập: 0 lượt ghi Firestore (lưu cục bộ trên trình duyệt học sinh, chỉ cập nhật RAM nếu có gọi API cũ)
   public toggleStudentBookmark(
     userId: string,
     questionId: string
@@ -322,7 +322,6 @@ export class ServerAppDataStore {
       bookmarkedQuestions: nextBookmarks,
     };
     this.engine.upsertUser(updated);
-    this.fireAndForgetPersist(this.persistence.saveUser(updated));
     return updated;
   }
 
@@ -365,7 +364,6 @@ export class ServerAppDataStore {
       },
     };
     this.engine.upsertUser(updated);
-    this.fireAndForgetPersist(this.persistence.saveUser(updated));
     return updated;
   }
 
@@ -391,7 +389,6 @@ export class ServerAppDataStore {
       masteredQuestions,
     };
     this.engine.upsertUser(updated);
-    this.fireAndForgetPersist(this.persistence.saveUser(updated));
     return updated;
   }
 
@@ -420,10 +417,10 @@ export class ServerAppDataStore {
       totalStudyMinutes: Math.round(nextSec / 60),
     };
     this.engine.upsertUser(updated);
-    this.fireAndForgetPersist(this.persistence.saveUser(updated));
     return updated;
   }
 
+  // Nộp bài Thi thử: ĐÚNG 1 lượt ghi Firestore duy nhất (tài liệu attempts/{id}), KHÔNG ghi thêm tài liệu users/{uid}
   public saveStudentAttempt(
     userId: string,
     attempt: ExamAttempt,
@@ -472,8 +469,8 @@ export class ServerAppDataStore {
       totalStudySeconds: nextSec,
       totalStudyMinutes: Math.round(nextSec / 60),
     };
+    // Chỉ cập nhật RAM để giáo viên xem trạng thái trực tuyến, KHÔNG ghi Firestore users/{uid}
     this.engine.upsertUser(updatedUser);
-    this.fireAndForgetPersist(this.persistence.saveUser(updatedUser));
     return { attempt: cleanAttempt, user: updatedUser };
   }
 
@@ -613,6 +610,7 @@ export class ServerAppDataStore {
       wrongQuestions: [],
       masteredQuestions: [],
       practiceProgress: {},
+      progressResetAt: new Date().toISOString(),
     };
     this.engine.upsertUser(updated);
     this.fireAndForgetPersist(this.persistence.saveUser(updated));

@@ -286,3 +286,181 @@ test('createThrottledSseDispatcher đẩy ngay lập tức các sự kiện tr�
   assert.equal(flushed.length, 3);
   assert.equal(flushed[2].type, 'session:updated');
 });
+
+test('Thi trực tiếp gộp đáp án vào 1 tài liệu attempts/{id}: chỉ ghi khi Bắt đầu, Checkpoint 20 phút/Shutdown và Nộp bài (0 lượt ghi mỗi cú click)', async () => {
+  const savedAttempts: Array<{
+    id: string;
+    status: string;
+    answeredCount: number;
+    bundledCount: number;
+  }> = [];
+  let savedAnswerHookCalls = 0;
+
+  const engine = new ExamSessionEngine({
+    storageAdapter: {
+      onAttemptSaved: (attempt) => {
+        savedAttempts.push({
+          id: attempt.id,
+          status: attempt.status,
+          answeredCount: attempt.answeredCount ?? 0,
+          bundledCount: Object.keys(attempt.savedAnswers ?? {}).length,
+        });
+      },
+      onAnswerSaved: () => {
+        savedAnswerHookCalls += 1;
+      },
+    },
+  });
+
+  engine.setUsers(createFixtureUsers());
+  engine.setQuestions(createFixtureQuestions(10));
+
+  const session = engine.createSession('admin', {
+    title: 'Ca thi tối ưu lượt ghi',
+    targetClass: '12A1',
+    questionCount: 5,
+    durationMinutes: 45,
+    selectionMode: 'proportional',
+    maxViolations: 3,
+    passScore: 700,
+    resultVisibility: 'score_only',
+  });
+  engine.openSession('admin', session.id);
+
+  // 1. Bắt đầu thi -> đúng 1 lượt ghi attempts/{id}
+  const paper = engine.startOrResumeAttempt('hs_01', session.code, 'device_opt_1');
+  assert.equal(savedAttempts.length, 1);
+  assert.equal(savedAttempts[0].status, 'in_progress');
+  assert.equal(engine.getDirtyAttemptIds().length, 0);
+
+  // 2. Học sinh chọn 5 đáp án liên tiếp -> 0 lượt ghi Firestore thêm, lưu tức thì trong RAM & đánh dấu dirty
+  for (const q of paper.questions) {
+    engine.saveAttemptAnswer('hs_01', paper.attempt.id, {
+      sessionToken: paper.sessionToken,
+      questionId: q.id,
+      selectedAnswer: 'A',
+    });
+  }
+  assert.equal(savedAttempts.length, 1);
+  // onAnswerSaved vẫn được gọi cho local cache/backup, còn Firestore adapter là no-op (0 lượt ghi Firestore)
+  assert.equal(savedAnswerHookCalls, 5);
+  assert.deepEqual(engine.getDirtyAttemptIds(), [paper.attempt.id]);
+
+  // 3. Học sinh F5 tải lại trang trên cùng thiết bị -> khôi phục đủ 5 đáp án từ RAM, 0 lượt ghi Firestore mới
+  const resumed = engine.startOrResumeAttempt('hs_01', session.code, 'device_opt_1');
+  assert.equal(Object.keys(resumed.savedAnswers).length, 5);
+  assert.equal(savedAttempts.length, 1);
+
+  // 4. Điểm lưu an toàn 20 phút (hoặc flush trước khi tắt server) -> ghi 1 lần duy nhất kèm đủ 5 đáp án gộp
+  const flushedIds = await engine.flushDirtyAttempts();
+  assert.deepEqual(flushedIds, [paper.attempt.id]);
+  assert.equal(savedAttempts.length, 2);
+  assert.equal(savedAttempts[1].status, 'in_progress');
+  assert.equal(savedAttempts[1].bundledCount, 5);
+  assert.equal(engine.getDirtyAttemptIds().length, 0);
+
+  // Nếu không có thay đổi mới, lần checkpoint tiếp theo ghi 0 lượt
+  const emptyFlush = await engine.flushDirtyAttempts();
+  assert.deepEqual(emptyFlush, []);
+  assert.equal(savedAttempts.length, 2);
+
+  // 5. Nộp bài -> ghi 1 lần cuối cùng chứa điểm chính thức + toàn bộ savedAnswers gộp
+  const finalResult = engine.submitAttempt(
+    'hs_01',
+    paper.attempt.id,
+    resumed.sessionToken
+  );
+  assert.equal(finalResult.status, 'submitted');
+  assert.equal(finalResult.score, 1000);
+  assert.equal(savedAttempts.length, 3);
+  assert.equal(savedAttempts[2].status, 'submitted');
+  assert.equal(savedAttempts[2].bundledCount, 5);
+  assert.equal(engine.getDirtyAttemptIds().length, 0);
+});
+
+test('hydrateState tương thích ngược 100%: khôi phục đồng thời cả savedAnswers gộp mới và bảng attempt_answers cũ', () => {
+  let persistedAttemptRecord: import('../types/examSession.ts').SessionAttemptRecord | null = null;
+  const engine = new ExamSessionEngine({
+    storageAdapter: {
+      onAttemptSaved: (attempt) => {
+        persistedAttemptRecord = { ...attempt };
+      },
+    },
+  });
+  engine.setUsers(createFixtureUsers());
+  engine.setQuestions(createFixtureQuestions(6));
+
+  const draftSession = engine.createSession('admin', {
+    title: 'Ca thi tương thích ngược',
+    targetClass: '12A1',
+    questionCount: 4,
+    durationMinutes: 45,
+    selectionMode: 'proportional',
+    maxViolations: 3,
+    passScore: 700,
+    resultVisibility: 'score_only',
+  });
+  const openSession = engine.openSession('admin', draftSession.id);
+  const startedPaper = engine.startOrResumeAttempt('hs_01', openSession.code, 'dev_compat');
+  assert.ok(persistedAttemptRecord);
+  const [q1, q2, q3] = startedPaper.questions;
+
+  // Khôi phục một bài thi có đáp án q1 trong trường gộp savedAnswers và q2, q3 trong collection cũ attempt_answers
+  const freshEngine = new ExamSessionEngine();
+  freshEngine.setUsers(createFixtureUsers());
+  freshEngine.setQuestions(createFixtureQuestions(6));
+  freshEngine.hydrateState({
+    sessions: [openSession],
+    attempts: [
+      {
+        ...(persistedAttemptRecord as import('../types/examSession.ts').SessionAttemptRecord),
+        savedAnswers: {
+          [q1.id]: {
+            questionId: q1.id,
+            selectedAnswer: 'A',
+            savedAt: '2026-06-01T08:02:00.000Z',
+            timeSpentSeconds: 10,
+            flagged: false,
+          },
+          [q2.id]: {
+            questionId: q2.id,
+            selectedAnswer: 'B',
+            savedAt: '2026-06-01T08:01:00.000Z',
+            timeSpentSeconds: 8,
+            flagged: false,
+          },
+        },
+      },
+    ],
+    attemptAnswers: [
+      {
+        id: `${startedPaper.attempt.id}_${q2.id}`,
+        attemptId: startedPaper.attempt.id,
+        sessionId: openSession.id,
+        studentId: 'hs_01',
+        questionId: q2.id,
+        selectedAnswer: 'A', // mới hơn bản trong savedAnswers -> phải ưu tiên bản mới hơn
+        savedAt: '2026-06-01T08:03:00.000Z',
+        timeSpentSeconds: 15,
+        flagged: false,
+      },
+      {
+        id: `${startedPaper.attempt.id}_${q3.id}`,
+        attemptId: startedPaper.attempt.id,
+        sessionId: openSession.id,
+        studentId: 'hs_01',
+        questionId: q3.id,
+        selectedAnswer: 'C',
+        savedAt: '2026-06-01T08:04:00.000Z',
+        timeSpentSeconds: 12,
+        flagged: true,
+      },
+    ],
+  });
+
+  const resumed = freshEngine.startOrResumeAttempt('hs_01', openSession.code, 'dev_compat');
+  assert.equal(resumed.savedAnswers[q1.id].selectedAnswer, 'A');
+  assert.equal(resumed.savedAnswers[q2.id].selectedAnswer, 'A');
+  assert.equal(resumed.savedAnswers[q3.id].selectedAnswer, 'C');
+});
+

@@ -259,7 +259,8 @@ test('Login uses Express RAM cache with 0 Firestore lookupUser calls once hydrat
     assert.equal(loggedUser.id, 'hs_a');
     assert.equal(loggedUser.password, '');
     assert.equal(loggedUser.activeStatus, 'studying');
-    assert.equal(ctx.persistence.savedUsers.length, 1);
+    // Đăng nhập chỉ cập nhật trạng thái trong RAM (0 lượt ghi Firestore)
+    assert.equal(ctx.persistence.savedUsers.length, 0);
 
     // Non-existent user while hydrated (and not quota-exceeded) returns 401 without calling Firestore lookup
     const badLogin = await apiJson(ctx.baseUrl, '/api/auth/login', {
@@ -416,9 +417,27 @@ test('Role-scoped bootstrap & student write-through mutations immediately reflec
     assert.deepEqual(refreshedStudentA.masteredQuestions, ['Q1']);
     assert.equal((teacherBoot.data.attempts as ExamAttempt[]).length, 2);
 
-    // Persistence adapter received the attempt write-through
+    // Kiểm chứng ngân sách ghi Firestore:
+    // - Đăng nhập, bookmark, kiểm tra đáp án, đã nắm vững, thời gian ôn tập = 0 lượt ghi vào users/{uid}
+    // - Nộp bài thi thử = đúng 1 lượt ghi duy nhất vào attempts/{attempt.id} và 0 lượt ghi vào users/{uid}
+    assert.equal(ctx.persistence.savedUsers.length, 0);
     assert.equal(ctx.persistence.savedAttempts.length, 1);
     assert.equal(ctx.persistence.savedAttempts[0].id, 'att_a_1');
+
+    // Giáo viên bấm Reset tiến độ học sinh -> ghi ngay progressResetAt và xóa attempts của học sinh đó
+    const resetRes = await apiJson(
+      ctx.baseUrl,
+      '/api/teacher/students/hs_a/reset-progress',
+      {
+        method: 'POST',
+        token: teacherToken,
+      }
+    );
+    assert.equal(resetRes.status, 200);
+    assert.equal(ctx.persistence.savedUsers.length, 1);
+    assert.equal(ctx.persistence.savedUsers[0].id, 'hs_a');
+    assert.equal(typeof ctx.persistence.savedUsers[0].progressResetAt, 'string');
+    assert.deepEqual(ctx.persistence.deletedAttemptIds, ['att_a_1']);
   } finally {
     await ctx.close();
   }

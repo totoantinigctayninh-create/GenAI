@@ -233,16 +233,7 @@ function createClientStorageAdapter(): ExamStorageAdapter {
         localState.attemptAnswers.push(answer);
       }
       persistSnapshot();
-
-      const path = `attempt_answers/${answer.id}`;
-      try {
-        await setDoc(
-          doc(db, 'attempt_answers', answer.id),
-          stripUndefinedFields(answer)
-        );
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, path);
-      }
+      // Đáp án được lưu đệm cục bộ và gộp vào tài liệu `attempts/{attemptId}.savedAnswers` khi checkpoint/nộp bài (0 lượt ghi lẻ).
     },
 
     async onViolationSaved(violation: ViolationEventRecord) {

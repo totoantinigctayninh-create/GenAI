@@ -227,13 +227,10 @@ export function createFirestoreExamStorageAdapter(
       }
     },
 
-    async onAnswerSaved(answer: AttemptAnswerRecord) {
-      const path = `attempt_answers/${answer.id}`;
-      try {
-        await setDoc(doc(db, 'attempt_answers', answer.id), stripUndefinedFields(answer));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, path, resolveStore());
-      }
+    async onAnswerSaved(_answer: AttemptAnswerRecord) {
+      // 0 lượt ghi Firestore cho từng lần chọn đáp án lẻ:
+      // Đáp án luôn lưu tức thì trong RAM (ExamSessionEngine) và được gộp vào trường `savedAnswers`
+      // của đúng 1 tài liệu `attempts/{attemptId}` ở 3 mốc: Bắt đầu thi, Checkpoint 20 phút, và Nộp bài/Tắt máy chủ.
     },
 
     async onViolationSaved(violation: ViolationEventRecord) {
@@ -493,9 +490,12 @@ export async function fetchQuestionCountFromFirestore(): Promise<number> {
   }
 }
 
+export const LIVE_EXAM_CHECKPOINT_INTERVAL_MS = 20 * 60 * 1000;
+
 /**
  * Khởi tải dữ liệu MỘT LẦN DUY NHẤT từ Firestore vào RAM máy chủ (`ExamSessionEngine` + `ServerAppDataStore`).
  * Không mở `onSnapshot` trùng lặp trên máy chủ để loại bỏ hoàn toàn lượt đọc dư thừa.
+ * Đồng thời khởi chạy bộ hẹn giờ checkpoint an toàn mỗi 20 phút cho các lượt thi trực tuyến đang làm bài.
  */
 export async function syncEngineWithFirestore(
   engine: ExamSessionEngine,
@@ -629,7 +629,13 @@ export async function syncEngineWithFirestore(
     engine.sweepExpiredAttempts();
   }, 5000);
 
+  // Checkpoint an toàn giữa giờ mỗi 20 phút: chỉ ghi gộp 1 tài liệu attempts/{id} cho các lượt thi có đáp án thay đổi
+  const checkpointTimer = setInterval(() => {
+    void engine.flushDirtyAttempts();
+  }, LIVE_EXAM_CHECKPOINT_INTERVAL_MS);
+
   return () => {
     clearInterval(sweepTimer);
+    clearInterval(checkpointTimer);
   };
 }

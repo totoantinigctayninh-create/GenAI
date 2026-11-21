@@ -8,6 +8,7 @@ import {
 import type {
   AttemptAnswerRecord,
   AttemptSubmitReason,
+  BundledAttemptAnswer,
   ExamAuditAction,
   ExamAuditLogRecord,
   ExamSessionRecord,
@@ -273,6 +274,10 @@ export class ExamSessionEngine {
   private users = new Map<string, UserAccount>();
   private questions = new Map<string, Question>();
 
+  /** Tập các lượt thi đang có đáp án/thay đổi mới trong RAM chờ ghi checkpoint 20 phút hoặc khi tắt máy chủ */
+  private dirtyAttemptIds = new Set<string>();
+  private attemptDirtyRevision = new Map<string, number>();
+
   private rateLimitByAccount = new Map<string, RateLimitBucket>();
   private rateLimitByIp = new Map<string, RateLimitBucket>();
 
@@ -289,6 +294,84 @@ export class ExamSessionEngine {
     this.nowFn = options.nowFn ?? (() => new Date());
     this.randomFn = options.randomFn ?? Math.random;
     this.storageAdapter = options.storageAdapter;
+  }
+
+  private markAttemptDirty(attemptId: string): void {
+    const nextRev = (this.attemptDirtyRevision.get(attemptId) ?? 0) + 1;
+    this.attemptDirtyRevision.set(attemptId, nextRev);
+    this.dirtyAttemptIds.add(attemptId);
+  }
+
+  private clearAttemptDirty(attemptId: string): void {
+    this.dirtyAttemptIds.delete(attemptId);
+  }
+
+  public getDirtyAttemptIds(): string[] {
+    return Array.from(this.dirtyAttemptIds);
+  }
+
+  public buildSavedAnswersBundle(
+    attemptId: string
+  ): Record<string, BundledAttemptAnswer> {
+    const bundle: Record<string, BundledAttemptAnswer> = {};
+    for (const ans of this.attemptAnswers.values()) {
+      if (ans.attemptId !== attemptId) continue;
+      bundle[ans.questionId] = {
+        questionId: ans.questionId,
+        selectedAnswer: ans.selectedAnswer,
+        savedAt: ans.savedAt,
+        timeSpentSeconds: ans.timeSpentSeconds,
+        flagged: ans.flagged,
+      };
+    }
+    return bundle;
+  }
+
+  private attachSavedAnswersBundle(
+    attempt: SessionAttemptRecord
+  ): SessionAttemptRecord {
+    return {
+      ...attempt,
+      savedAnswers: this.buildSavedAnswersBundle(attempt.id),
+    };
+  }
+
+  /**
+   * Ghi chốt an toàn (checkpoint 20 phút hoặc khi tắt máy chủ SIGTERM/SIGINT):
+   * Chỉ ghi đúng 1 tài liệu `attempts/{id}` (kèm toàn bộ `savedAnswers` gộp) cho các lượt thi có thay đổi mới.
+   */
+  public async flushDirtyAttempts(): Promise<string[]> {
+    const dirtyIds = Array.from(this.dirtyAttemptIds);
+    if (dirtyIds.length === 0) return [];
+
+    const flushedIds: string[] = [];
+    for (const attemptId of dirtyIds) {
+      const attempt = this.attempts.get(attemptId);
+      if (!attempt) {
+        this.dirtyAttemptIds.delete(attemptId);
+        continue;
+      }
+
+      const revBeforeWrite = this.attemptDirtyRevision.get(attemptId) ?? 0;
+      const bundledAttempt = this.attachSavedAnswersBundle(attempt);
+      this.attempts.set(attemptId, bundledAttempt);
+
+      try {
+        await this.storageAdapter?.onAttemptSaved?.(bundledAttempt);
+        flushedIds.push(attemptId);
+        // Chỉ xóa khỏi dirty set nếu không có câu trả lời mới phát sinh trong lúc đang ghi Firestore
+        if ((this.attemptDirtyRevision.get(attemptId) ?? 0) === revBeforeWrite) {
+          this.dirtyAttemptIds.delete(attemptId);
+        }
+      } catch (error) {
+        console.warn(
+          `Checkpoint flush warning for attempt ${attemptId}:`,
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
+
+    return flushedIds;
   }
 
   /**
@@ -524,12 +607,48 @@ export class ExamSessionEngine {
       for (const a of data.attempts) {
         if (a.sessionId && Array.isArray(a.generatedQuestions)) {
           this.attempts.set(a.id, a);
+          // Giải nén trường gộp `savedAnswers` (kiến trúc mới) vào RAM `attemptAnswers`
+          if (a.savedAnswers && typeof a.savedAnswers === 'object') {
+            for (const [qId, item] of Object.entries(a.savedAnswers)) {
+              if (!item || typeof item !== 'object') continue;
+              const questionId = item.questionId || qId;
+              const recordId = `${a.id}_${questionId}`;
+              this.attemptAnswers.set(recordId, {
+                id: recordId,
+                attemptId: a.id,
+                sessionId: a.sessionId,
+                studentId: a.studentId,
+                questionId,
+                selectedAnswer: item.selectedAnswer ?? null,
+                savedAt: item.savedAt || a.submittedAt || a.startedAt,
+                timeSpentSeconds: Math.max(
+                  0,
+                  Math.floor(Number(item.timeSpentSeconds) || 0)
+                ),
+                flagged: Boolean(item.flagged),
+              });
+            }
+          }
         }
       }
     }
     if (data.attemptAnswers) {
+      // Tương thích ngược 100% với bản ghi lịch sử cũ trong collection `attempt_answers`
       for (const ans of data.attemptAnswers) {
-        this.attemptAnswers.set(ans.id, ans);
+        const canonicalKey =
+          ans.attemptId && ans.questionId
+            ? `${ans.attemptId}_${ans.questionId}`
+            : ans.id;
+        const existing = this.attemptAnswers.get(canonicalKey);
+        if (
+          !existing ||
+          String(ans.savedAt || '').localeCompare(String(existing.savedAt || '')) > 0
+        ) {
+          this.attemptAnswers.set(canonicalKey, {
+            ...ans,
+            id: canonicalKey,
+          });
+        }
       }
     }
     if (data.violations) {
@@ -846,9 +965,11 @@ export class ExamSessionEngine {
       questionResults: evaluation.questionResults,
       topicBreakdown: evaluation.topicBreakdown,
       typeBreakdown: evaluation.typeBreakdown,
+      savedAnswers: this.buildSavedAnswersBundle(attempt.id),
     };
 
     this.attempts.set(updated.id, updated);
+    this.clearAttemptDirty(updated.id);
     this.storageAdapter?.onAttemptSaved?.(updated);
     this.emitSessionEvent({
       type: 'student:submitted',
@@ -1342,7 +1463,7 @@ export class ExamSessionEngine {
         status: 'in_progress',
       };
 
-      // Sao chép toàn bộ đáp án đã lưu từ bài cũ sang lượt thi mới để học sinh làm tiếp
+      // Sao chép toàn bộ đáp án đã lưu từ bài cũ sang lượt thi mới trong RAM rồi gộp ghi 1 lần duy nhất vào `attempts/{newAttemptId}`
       const { recordsByQuestionId } = this.getSavedAnswerMapForAttempt(attempt.id);
       let preservedAnswersCount = 0;
       for (const oldAns of Object.values(recordsByQuestionId)) {
@@ -1354,14 +1475,15 @@ export class ExamSessionEngine {
           savedAt: nowIso,
         };
         this.attemptAnswers.set(clonedRecordId, clonedAns);
-        this.storageAdapter?.onAnswerSaved?.(clonedAns);
         if (oldAns.selectedAnswer !== null && oldAns.selectedAnswer !== undefined) {
           preservedAnswersCount += 1;
         }
       }
 
-      this.attempts.set(newAttempt.id, newAttempt);
-      this.storageAdapter?.onAttemptSaved?.(newAttempt);
+      const bundledNewAttempt = this.attachSavedAnswersBundle(newAttempt);
+      this.attempts.set(bundledNewAttempt.id, bundledNewAttempt);
+      this.clearAttemptDirty(bundledNewAttempt.id);
+      this.storageAdapter?.onAttemptSaved?.(bundledNewAttempt);
 
       this.recordAuditLog({
         sessionId,
@@ -2406,7 +2528,8 @@ export class ExamSessionEngine {
           : {}),
       };
       this.attempts.set(updatedAttempt.id, updatedAttempt);
-      this.storageAdapter?.onAttemptSaved?.(updatedAttempt);
+      // Không ghi thừa Firestore khi học sinh chỉ F5 tải lại trang trên cùng thiết bị; đánh dấu dirty để ghi vào checkpoint tiếp theo
+      this.markAttemptDirty(updatedAttempt.id);
 
       // Nếu đăng nhập từ thiết bị khác khi phiên cũ đang mở -> đóng phiên cũ và ghi nhận vi phạm
       if (isDifferentActiveDevice) {
@@ -2490,8 +2613,11 @@ export class ExamSessionEngine {
       status: 'in_progress',
     };
 
-    this.attempts.set(newAttempt.id, newAttempt);
-    this.storageAdapter?.onAttemptSaved?.(newAttempt);
+    const initialBundledAttempt = this.attachSavedAnswersBundle(newAttempt);
+    this.attempts.set(initialBundledAttempt.id, initialBundledAttempt);
+    this.clearAttemptDirty(initialBundledAttempt.id);
+    // Checkpoint (a): Ghi ngay tài liệu attempts/{id} lúc bắt đầu làm bài (1 lượt ghi)
+    this.storageAdapter?.onAttemptSaved?.(initialBundledAttempt);
     this.emitSessionEvent({
       type: 'student:joined',
       sessionId: session.id,
@@ -2680,6 +2806,9 @@ export class ExamSessionEngine {
     };
 
     this.attemptAnswers.set(recordId, record);
+    this.markAttemptDirty(attempt.id);
+    // Không ghi từng tài liệu `attempt_answers/{id}` lên Firestore mỗi lần bấm chọn đáp án;
+    // vẫn gọi hook onAnswerSaved (chỉ dùng cho local cache/test) để giữ nguyên tương thích.
     this.storageAdapter?.onAnswerSaved?.(record);
     this.emitSessionEvent({
       type: 'student:progress',
@@ -2734,7 +2863,7 @@ export class ExamSessionEngine {
             : Boolean(existing?.flagged),
       };
       this.attemptAnswers.set(recordId, record);
-      this.storageAdapter?.onAnswerSaved?.(record);
+      this.markAttemptDirty(attempt.id);
     }
   }
 
@@ -2806,15 +2935,18 @@ export class ExamSessionEngine {
       violationCount: nextViolationCount,
     };
     this.attempts.set(updatedAttempt.id, updatedAttempt);
-    this.storageAdapter?.onAttemptSaved?.(updatedAttempt);
 
     let autoSubmitted = false;
     if (
       updatedAttempt.status === 'in_progress' &&
       nextViolationCount >= session.maxViolations
     ) {
+      // Sắp tự nộp do vi phạm -> chỉ ghi 1 lần duy nhất trong finalizeAttemptOnServer kèm toàn bộ đáp án
       updatedAttempt = this.finalizeAttemptOnServer(updatedAttempt, 'violation');
       autoSubmitted = true;
+    } else {
+      // Vi phạm chưa vượt ngưỡng đã được ghi ngay qua onViolationSaved; đánh dấu dirty để gộp vào checkpoint tiếp theo
+      this.markAttemptDirty(updatedAttempt.id);
     }
 
     this.emitSessionEvent({

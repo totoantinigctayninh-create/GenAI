@@ -887,6 +887,7 @@ export async function resetStudentLearningDataInFirestore(
           wrongQuestions: [],
           masteredQuestions: [],
           practiceProgress: {},
+          progressResetAt: new Date().toISOString(),
         },
         { merge: true }
       );
