@@ -4,6 +4,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getCountFromServer,
   getDoc,
   getDocs,
   getFirestore,
@@ -237,6 +238,20 @@ export async function lookupUserFromFirestore(
   }
 
   return null;
+}
+
+/**
+ * Đếm nhanh số câu hỏi hiện có trên Firestore bằng truy vấn tổng hợp (không tải nội dung/đáp án),
+ * giúp API `/api/public/stats` luôn trả về số lượng chính xác ngay cả khi máy chủ vừa khởi động nguội (cold start).
+ */
+export async function fetchQuestionCountFromFirestore(): Promise<number> {
+  try {
+    const snap = await getCountFromServer(collection(db, 'questions'));
+    return Number(snap.data().count) || 0;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'questions');
+    return 0;
+  }
 }
 
 /**

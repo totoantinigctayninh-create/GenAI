@@ -13,7 +13,7 @@ interface LoginScreenProps {
   errorMessage: string | null;
   onClearError?: () => void;
   seededUsers: UserAccount[];
-  questionsCount: number;
+  questionsCount: number | null;
   departmentLogoUrl?: string;
 }
 
@@ -99,7 +99,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
           {/* Dải thông số tối giản ở chân cột trái */}
           <div className="relative z-10 w-full mt-3 pt-2.5 lg:mt-0 lg:pt-5 border-t border-white/10 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 lg:gap-6 text-[11px] sm:text-xs text-teal-100/90 font-semibold tabular-nums">
-            <span>{questionsCount} Câu hỏi chuẩn hóa</span>
+            <span>
+              {questionsCount && questionsCount > 0
+                ? `${questionsCount} Câu hỏi chuẩn hóa`
+                : 'Ngân hàng câu hỏi chuẩn hóa'}
+            </span>
             <span className="w-1 h-1 rounded-full bg-amber-400" />
             <span>Thang điểm 1000</span>
           </div>

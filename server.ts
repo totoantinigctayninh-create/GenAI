@@ -5,6 +5,7 @@ import { ExamSessionEngine } from './src/server/examSessionEngine.ts';
 import { createExamSessionRouter } from './src/server/examSessionRoutes.ts';
 import {
   createFirestoreExamStorageAdapter,
+  fetchQuestionCountFromFirestore,
   lookupUserFromFirestore,
   syncEngineWithFirestore,
 } from './src/server/firestoreExamStorage.ts';
@@ -30,7 +31,10 @@ export async function startServer() {
   // Mount API Quản lý Ca thi & Phòng thi ("Thi ngay" / "Ca thi")
   app.use(
     '/api',
-    createExamSessionRouter(engine, { lookupUser: lookupUserFromFirestore })
+    createExamSessionRouter(engine, {
+      lookupUser: lookupUserFromFirestore,
+      fetchQuestionCount: fetchQuestionCountFromFirestore,
+    })
   );
 
   if (process.env.NODE_ENV !== 'production') {

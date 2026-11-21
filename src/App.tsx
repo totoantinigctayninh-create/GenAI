@@ -13,6 +13,7 @@ import {
   deleteQuestionFromFirestore,
   deleteStudentAccount,
   ensureSeedDataInitialized,
+  fetchPublicQuestionsCount,
   fetchQuestionsOnce,
   isLegacyVirtualAttempt,
   isLegacyVirtualQuestion,
@@ -54,6 +55,7 @@ import { examSessionApi } from './services/examSessionApi';
 
 const SESSION_STORAGE_KEY = 'certiport_genai_active_user_id_v3';
 const DEPARTMENT_LOGO_CACHE_KEY = 'igc_toantin_logo_url_v2';
+const PUBLIC_QUESTIONS_COUNT_CACHE_KEY = 'certiport_genai_public_questions_count_v1';
 
 // Dọn sạch các khóa bộ nhớ cục bộ cũ từng lưu danh sách tài khoản/mật khẩu hoặc ngân hàng câu hỏi/đáp án
 try {
@@ -73,7 +75,14 @@ export default function App() {
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [attempts, setAttempts] = useState<ExamAttempt[]>([]);
-  const [publicQuestionsCount, setPublicQuestionsCount] = useState<number>(0);
+  const [publicQuestionsCount, setPublicQuestionsCount] = useState<number | null>(() => {
+    try {
+      const cached = Number(localStorage.getItem(PUBLIC_QUESTIONS_COUNT_CACHE_KEY));
+      return Number.isFinite(cached) && cached > 0 ? cached : null;
+    } catch {
+      return null;
+    }
+  });
   const [authenticatedUserSnapshot, setAuthenticatedUserSnapshot] =
     useState<UserAccount | null>(null);
 
@@ -117,14 +126,39 @@ export default function App() {
     return tabParam === 'live-exam' || tabParam === 'thingay';
   });
 
-  // Tải số lượng câu hỏi công khai cho màn hình đăng nhập (không tải nội dung/đáp án)
+  // Tải số lượng câu hỏi công khai cho màn hình đăng nhập (không tải nội dung/đáp án).
+  // Nếu máy chủ API đang khởi động nguội hoặc chạy trên môi trường tĩnh trả về 0/lỗi, tự động đếm trực tiếp từ Firestore.
   useEffect(() => {
     let cancelled = false;
-    examSessionApi.getPublicStats().then((stats) => {
-      if (!cancelled && stats && typeof stats.questionsCount === 'number') {
+    const persistCount = (count: number) => {
+      setPublicQuestionsCount(count);
+      if (count > 0) {
+        try {
+          localStorage.setItem(PUBLIC_QUESTIONS_COUNT_CACHE_KEY, String(count));
+        } catch {
+          // Bỏ qua
+        }
+      }
+    };
+
+    const loadPublicQuestionsCount = async () => {
+      const stats = await examSessionApi.getPublicStats();
+      if (cancelled) return;
+      if (stats && typeof stats.questionsCount === 'number' && stats.questionsCount > 0) {
+        persistCount(stats.questionsCount);
+        return;
+      }
+
+      const firestoreCount = await fetchPublicQuestionsCount();
+      if (cancelled) return;
+      if (typeof firestoreCount === 'number' && firestoreCount > 0) {
+        persistCount(firestoreCount);
+      } else if (stats && typeof stats.questionsCount === 'number') {
         setPublicQuestionsCount(stats.questionsCount);
       }
-    });
+    };
+
+    void loadPublicQuestionsCount();
     return () => {
       cancelled = true;
     };
@@ -393,6 +427,14 @@ export default function App() {
         setQuestions(liveQuestions);
         if (liveQuestions.length > 0) {
           setPublicQuestionsCount(liveQuestions.length);
+          try {
+            localStorage.setItem(
+              PUBLIC_QUESTIONS_COUNT_CACHE_KEY,
+              String(liveQuestions.length)
+            );
+          } catch {
+            // Bỏ qua
+          }
         }
       });
       const unsubAttempts = subscribeToAttempts((liveAttempts) => {
@@ -422,6 +464,14 @@ export default function App() {
         setQuestions(fetchedQuestions);
         if (fetchedQuestions.length > 0) {
           setPublicQuestionsCount(fetchedQuestions.length);
+          try {
+            localStorage.setItem(
+              PUBLIC_QUESTIONS_COUNT_CACHE_KEY,
+              String(fetchedQuestions.length)
+            );
+          } catch {
+            // Bỏ qua
+          }
         }
       });
     }
@@ -937,7 +987,7 @@ export default function App() {
           errorMessage={loginError}
           onClearError={() => setLoginError(null)}
           seededUsers={users}
-          questionsCount={questions.length || publicQuestionsCount}
+          questionsCount={questions.length > 0 ? questions.length : publicQuestionsCount}
           departmentLogoUrl={effectiveDepartmentLogoUrl}
         />
       ) : currentUser.role === 'teacher' ? (

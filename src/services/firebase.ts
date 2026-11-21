@@ -4,6 +4,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getCountFromServer,
   getDoc,
   getDocFromServer,
   getDocs,
@@ -994,6 +995,21 @@ export async function fetchQuestionsOnce(): Promise<Question[]> {
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'questions');
     return [];
+  }
+}
+
+/**
+ * Đếm nhanh tổng số câu hỏi chuẩn hóa cho màn hình đăng nhập bằng truy vấn tổng hợp `getCountFromServer`
+ * (chỉ tốn 1 lượt đọc, không tải bất kỳ nội dung câu hỏi hay đáp án nào về máy khách).
+ */
+export async function fetchPublicQuestionsCount(): Promise<number | null> {
+  try {
+    const snapshot = await getCountFromServer(collection(db, 'questions'));
+    const count = Number(snapshot.data().count);
+    return Number.isFinite(count) && count >= 0 ? count : null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'questions');
+    return null;
   }
 }
 

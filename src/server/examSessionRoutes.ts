@@ -21,6 +21,7 @@ import {
 export interface ExamSessionRouterOptions {
   authSecret?: string;
   lookupUser?: (usernameOrId: string) => Promise<UserAccount | null>;
+  fetchQuestionCount?: () => Promise<number>;
 }
 
 function sanitizeUserForClient(user: UserAccount): Omit<UserAccount, 'password'> & {
@@ -79,10 +80,21 @@ export function createExamSessionRouter(
   // 0. API CÔNG KHAI & XÁC THỰC PHIÊN LÀM VIỆC BẰNG CHỮ KÝ HMAC-SHA256
   // ============================================================================
 
-  router.get('/public/stats', (_req: Request, res: Response) => {
+  router.get('/public/stats', async (_req: Request, res: Response) => {
+    let questionsCount = engine.getQuestionCount();
+    if (questionsCount === 0 && options.fetchQuestionCount) {
+      try {
+        const remoteCount = await options.fetchQuestionCount();
+        if (remoteCount > 0) {
+          questionsCount = remoteCount;
+        }
+      } catch {
+        // Giữ nguyên giá trị hiện có nếu Firestore tạm thời chưa phản hồi
+      }
+    }
     res.json({
       ok: true,
-      questionsCount: engine.getQuestionCount(),
+      questionsCount,
     });
   });
 
