@@ -381,9 +381,36 @@ export class ExamSessionEngine {
     }
   }
 
+  public replaceUsers(usersList: UserAccount[]): void {
+    this.users.clear();
+    for (const u of usersList) {
+      const id = u.id || u.username;
+      this.users.set(id, { ...u, id });
+    }
+  }
+
   public upsertUser(user: UserAccount): void {
     const id = user.id || user.username;
     this.users.set(id, { ...user, id });
+  }
+
+  public deleteUser(userId: string): void {
+    const clean = String(userId || '').trim();
+    if (!clean) return;
+    if (this.users.delete(clean)) return;
+    for (const [key, u] of this.users.entries()) {
+      if (
+        key.toLowerCase() === clean.toLowerCase() ||
+        u.id.toLowerCase() === clean.toLowerCase()
+      ) {
+        this.users.delete(key);
+        return;
+      }
+    }
+  }
+
+  public getAllUsers(): UserAccount[] {
+    return Array.from(this.users.values());
   }
 
   public getUser(userIdOrUsername: string): UserAccount | undefined {
@@ -407,6 +434,19 @@ export class ExamSessionEngine {
     for (const q of questionsList) {
       this.questions.set(q.id, q);
     }
+  }
+
+  public upsertQuestion(question: Question): void {
+    if (!question.id) return;
+    this.questions.set(question.id, question);
+  }
+
+  public deleteQuestion(questionId: string): void {
+    this.questions.delete(questionId);
+  }
+
+  public getRawQuestions(): Question[] {
+    return Array.from(this.questions.values());
   }
 
   public getQuestionCount(): number {

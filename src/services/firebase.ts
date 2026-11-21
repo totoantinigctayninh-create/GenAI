@@ -121,6 +121,31 @@ export interface FirestoreErrorInfo {
   };
 }
 
+export const FIRESTORE_QUOTA_ERROR_MESSAGE =
+  'Hệ thống tạm thời chạm giới hạn kết nối cơ sở dữ liệu trong ngày. Vui lòng thử lại sau hoặc báo giáo viên.';
+
+export function isFirestoreQuotaError(error: unknown): boolean {
+  if (!error) return false;
+  const code =
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code.toLowerCase()
+      : '';
+  const msg =
+    error instanceof Error
+      ? error.message.toLowerCase()
+      : String(error).toLowerCase();
+  return (
+    code.includes('resource-exhausted') ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('quota exceeded') ||
+    msg.includes('quota limit exceeded') ||
+    msg.includes('free daily read units')
+  );
+}
+
 function isTransientOfflineError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return (
@@ -308,6 +333,7 @@ export async function authenticateWithUsernamePassword(
   }
 
   let matchedUser: UserAccount | null = null;
+  let quotaErrorEncountered = false;
 
   try {
     const directDoc = await getDoc(doc(db, 'users', cleanId));
@@ -324,6 +350,9 @@ export async function authenticateWithUsernamePassword(
       }
     }
   } catch (error) {
+    if (isFirestoreQuotaError(error)) {
+      quotaErrorEncountered = true;
+    }
     handleFirestoreError(error, OperationType.GET, `users/${cleanId}`);
   }
 
@@ -337,6 +366,9 @@ export async function authenticateWithUsernamePassword(
   }
 
   if (!matchedUser) {
+    if (quotaErrorEncountered) {
+      throw new Error(FIRESTORE_QUOTA_ERROR_MESSAGE);
+    }
     throw new Error(`Không tìm thấy tài khoản với mã định danh "${cleanId}".`);
   }
 

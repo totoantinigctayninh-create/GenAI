@@ -1,9 +1,12 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createAppDataRouter } from './src/server/appDataRoutes.ts';
+import { ServerAppDataStore } from './src/server/appDataStore.ts';
 import { ExamSessionEngine } from './src/server/examSessionEngine.ts';
 import { createExamSessionRouter } from './src/server/examSessionRoutes.ts';
 import {
+  createFirestoreAppDataPersistenceAdapter,
   createFirestoreExamStorageAdapter,
   fetchQuestionCountFromFirestore,
   lookupUserFromFirestore,
@@ -19,21 +22,35 @@ export async function startServer() {
 
   app.use(express.json({ limit: '5mb' }));
 
+  let appDataStoreRef: ServerAppDataStore | undefined;
+
   const engine = new ExamSessionEngine({
-    storageAdapter: createFirestoreExamStorageAdapter(),
+    storageAdapter: createFirestoreExamStorageAdapter(() => appDataStoreRef),
   });
 
-  // Khởi tạo đồng bộ Firestore & tác vụ nền quét hạn nộp định kỳ
-  syncEngineWithFirestore(engine).catch((err) => {
+  const appDataStore = new ServerAppDataStore(
+    engine,
+    createFirestoreAppDataPersistenceAdapter(() => {
+      appDataStoreRef?.markFirestoreQuotaExceeded(true);
+    })
+  );
+  appDataStoreRef = appDataStore;
+
+  // Khởi tải dữ liệu duy nhất 1 lần từ Firestore vào RAM máy chủ (không mở onSnapshot trùng lặp)
+  syncEngineWithFirestore(engine, appDataStore).catch((err) => {
     console.warn('Firestore initial sync warning:', err);
   });
 
-  // Mount API Quản lý Ca thi & Phòng thi ("Thi ngay" / "Ca thi")
+  // Mount API Write-Through Cache đọc/ghi qua RAM máy chủ (0 lượt đọc Firestore phía trình duyệt)
+  app.use('/api', createAppDataRouter(appDataStore));
+
+  // Mount API Quản lý Ca thi & Phòng thi ("Thi ngay" / "Ca thi") & Xác thực phiên
   app.use(
     '/api',
     createExamSessionRouter(engine, {
       lookupUser: lookupUserFromFirestore,
       fetchQuestionCount: fetchQuestionCountFromFirestore,
+      appDataStore,
     })
   );
 

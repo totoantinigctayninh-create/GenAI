@@ -18,10 +18,17 @@ import {
   isCriticalSessionRealtimeEvent,
 } from './sseThrottle.ts';
 
+import {
+  FirestoreQuotaExceededError,
+  isFirestoreQuotaError,
+  type ServerAppDataStore,
+} from './appDataStore.ts';
+
 export interface ExamSessionRouterOptions {
   authSecret?: string;
   lookupUser?: (usernameOrId: string) => Promise<UserAccount | null>;
   fetchQuestionCount?: () => Promise<number>;
+  appDataStore?: ServerAppDataStore;
 }
 
 function sanitizeUserForClient(user: UserAccount): Omit<UserAccount, 'password'> & {
@@ -54,6 +61,18 @@ function extractSessionToken(req: Request): string | undefined {
 }
 
 function handleRouteError(res: Response, error: unknown): void {
+  if (error instanceof FirestoreQuotaExceededError || isFirestoreQuotaError(error)) {
+    const quotaErr =
+      error instanceof FirestoreQuotaExceededError
+        ? error
+        : new FirestoreQuotaExceededError();
+    res.status(quotaErr.statusCode).json({
+      ok: false,
+      errorCode: quotaErr.errorCode,
+      message: quotaErr.message,
+    });
+    return;
+  }
   if (error instanceof ExamEngineError) {
     res.status(error.statusCode).json({
       ok: false,
@@ -82,14 +101,22 @@ export function createExamSessionRouter(
 
   router.get('/public/stats', async (_req: Request, res: Response) => {
     let questionsCount = engine.getQuestionCount();
-    if (questionsCount === 0 && options.fetchQuestionCount) {
+    const shouldQueryRemote =
+      questionsCount === 0 &&
+      Boolean(options.fetchQuestionCount) &&
+      !options.appDataStore?.isQuestionsHydrated() &&
+      !options.appDataStore?.isFirestoreQuotaExceeded();
+
+    if (shouldQueryRemote && options.fetchQuestionCount) {
       try {
         const remoteCount = await options.fetchQuestionCount();
         if (remoteCount > 0) {
           questionsCount = remoteCount;
         }
-      } catch {
-        // Giữ nguyên giá trị hiện có nếu Firestore tạm thời chưa phản hồi
+      } catch (err) {
+        if (isFirestoreQuotaError(err)) {
+          options.appDataStore?.markFirestoreQuotaExceeded(true);
+        }
       }
     }
     res.json({
@@ -98,7 +125,7 @@ export function createExamSessionRouter(
     });
   });
 
-  // Đăng nhập bằng tài khoản & mật khẩu -> cấp mã phiên HMAC-SHA256 có chữ ký máy chủ
+  // Đăng nhập bằng tài khoản & mật khẩu -> ưu tiên đọc trực tiếp từ RAM máy chủ (0 lượt đọc Firestore)
   router.post('/auth/login', async (req: Request, res: Response) => {
     try {
       const username = String(req.body?.username || '').trim();
@@ -113,22 +140,49 @@ export function createExamSessionRouter(
       }
 
       let matched = engine.getUser(username);
-      if (!matched && options.lookupUser) {
-        const remoteUser = await options.lookupUser(username);
-        if (remoteUser) {
-          engine.upsertUser(remoteUser);
-          matched = engine.getUser(remoteUser.id) ?? remoteUser;
+      const usersHydrated = Boolean(options.appDataStore?.isUsersHydrated());
+      const quotaExceeded = Boolean(options.appDataStore?.isFirestoreQuotaExceeded());
+
+      // Chỉ gọi 1 lượt getDoc tới Firestore khi RAM máy chủ chưa kịp khởi tải xong lúc khởi động nguội
+      if (!matched && !usersHydrated && !quotaExceeded && options.lookupUser) {
+        try {
+          const remoteUser = await options.lookupUser(username);
+          if (remoteUser) {
+            engine.upsertUser(remoteUser);
+            matched = engine.getUser(remoteUser.id) ?? remoteUser;
+          }
+        } catch (lookupErr) {
+          if (isFirestoreQuotaError(lookupErr)) {
+            options.appDataStore?.markFirestoreQuotaExceeded(true);
+            throw new FirestoreQuotaExceededError();
+          }
+          throw lookupErr;
         }
-      } else if (matched && matched.password !== password && options.lookupUser) {
-        // Trường hợp mật khẩu vừa được cập nhật trên Firestore chưa kịp về snapshot
-        const freshRemote = await options.lookupUser(username);
-        if (freshRemote) {
-          engine.upsertUser(freshRemote);
-          matched = engine.getUser(freshRemote.id) ?? freshRemote;
+      } else if (
+        matched &&
+        matched.password !== password &&
+        !usersHydrated &&
+        !quotaExceeded &&
+        options.lookupUser
+      ) {
+        try {
+          const freshRemote = await options.lookupUser(username);
+          if (freshRemote) {
+            engine.upsertUser(freshRemote);
+            matched = engine.getUser(freshRemote.id) ?? freshRemote;
+          }
+        } catch (lookupErr) {
+          if (isFirestoreQuotaError(lookupErr)) {
+            options.appDataStore?.markFirestoreQuotaExceeded(true);
+          }
         }
       }
 
       if (!matched) {
+        // Nếu Firestore đang chạm hạn mức và RAM chưa có đủ danh sách tài khoản, báo rõ lỗi hạn mức thay vì báo nhầm "Không tìm thấy tài khoản"
+        if (options.appDataStore?.isFirestoreQuotaExceeded()) {
+          throw new FirestoreQuotaExceededError();
+        }
         throw new ExamEngineError(
           `Không tìm thấy tài khoản với mã định danh "${username}".`,
           401,
@@ -144,12 +198,15 @@ export function createExamSessionRouter(
         );
       }
 
+      const activeUser =
+        options.appDataStore?.recordUserLoginActivity(matched.id) ?? matched;
+
       const token = signAuthToken(
         {
-          sub: matched.id,
-          username: matched.username,
-          role: matched.role,
-          className: matched.className,
+          sub: activeUser.id,
+          username: activeUser.username,
+          role: activeUser.role,
+          className: activeUser.className,
         },
         { secret: options.authSecret }
       );
@@ -157,7 +214,7 @@ export function createExamSessionRouter(
       res.json({
         ok: true,
         token,
-        user: sanitizeUserForClient(matched),
+        user: sanitizeUserForClient(activeUser),
       });
     } catch (error) {
       handleRouteError(res, error);
@@ -178,15 +235,29 @@ export function createExamSessionRouter(
       }
 
       let user = engine.getUser(verified.sub);
-      if (!user && options.lookupUser) {
-        const remote = await options.lookupUser(verified.sub);
-        if (remote) {
-          engine.upsertUser(remote);
-          user = remote;
+      const usersHydrated = Boolean(options.appDataStore?.isUsersHydrated());
+      const quotaExceeded = Boolean(options.appDataStore?.isFirestoreQuotaExceeded());
+
+      if (!user && !usersHydrated && !quotaExceeded && options.lookupUser) {
+        try {
+          const remote = await options.lookupUser(verified.sub);
+          if (remote) {
+            engine.upsertUser(remote);
+            user = remote;
+          }
+        } catch (lookupErr) {
+          if (isFirestoreQuotaError(lookupErr)) {
+            options.appDataStore?.markFirestoreQuotaExceeded(true);
+            throw new FirestoreQuotaExceededError();
+          }
+          throw lookupErr;
         }
       }
 
       if (!user) {
+        if (options.appDataStore?.isFirestoreQuotaExceeded()) {
+          throw new FirestoreQuotaExceededError();
+        }
         throw new ExamEngineError(
           'Tài khoản không còn tồn tại trên hệ thống. Vui lòng đăng nhập lại.',
           401,

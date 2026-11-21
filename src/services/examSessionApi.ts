@@ -721,6 +721,7 @@ export const examSessionApi = {
   async verifySession(): Promise<
     | { status: 'valid'; user: UserAccount }
     | { status: 'invalid'; message: string }
+    | { status: 'quota_exceeded'; message: string }
     | { status: 'offline' }
   > {
     if (typeof window === 'undefined' || serverApiUnavailable) {
@@ -751,6 +752,19 @@ export const examSessionApi = {
       if (!data || typeof data !== 'object') {
         serverApiUnavailable = true;
         return { status: 'offline' };
+      }
+
+      if (
+        response.status === 503 ||
+        data.errorCode === 'FIRESTORE_QUOTA_EXCEEDED'
+      ) {
+        return {
+          status: 'quota_exceeded',
+          message: String(
+            data.message ||
+              'Hệ thống tạm thời chạm giới hạn kết nối cơ sở dữ liệu trong ngày. Vui lòng thử lại sau hoặc báo giáo viên.'
+          ),
+        };
       }
 
       if (!response.ok || data.ok === false) {
